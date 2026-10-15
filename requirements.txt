@@ -1,0 +1,15 @@
+Requirements for Hiking Trip Planner:
+
+Traffic
+Route path
+Location lookup
+look at hike trails
+suggestions in area around location
+cost, weather, and time of day
+favorite destinations and trips
+recreation options
+hotel info for long trips
+road attractions along path
+track previous trips
+fuel cost tracker
+recommendations for attire and gear
