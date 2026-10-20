@@ -15,3 +15,6 @@ Then open [http://localhost:8000](http://localhost:8000). The app uses plain HTM
 ## Data and privacy
 
 Location search uses OpenStreetMap Nominatim, nearby trail and place data uses Overpass API, map tiles are from OpenStreetMap, and forecasts use Open-Meteo. These services require an internet connection and may rate-limit requests. Favorites and trip logs are saved in this browser's local storage. Location is only accessed when you choose “Use my location.” Live traffic and turn-by-turn routing require a separate provider and are not included; verify road conditions and trail access before departure.
+
+
+https://discord.gg/yueVPwj7j
