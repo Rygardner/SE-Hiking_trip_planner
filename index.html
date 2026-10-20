@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f3f2ec" />
+    <title>Wilderpath — Hiking trip planner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <header class="brand-row">
+          <a class="brand" href="#" aria-label="Wilderpath home"><span class="brand-mark">W</span><span>WILDERPATH</span></a>
+          <span class="edition">FIELD NOTES / 01</span>
+        </header>
+
+        <section class="intro">
+          <p class="eyebrow">YOUR NEXT OUTSIDE</p>
+          <h1>Find your<br /><em>kind of wild.</em></h1>
+          <p class="intro-copy">A little less scrolling. A lot more trail.</p>
+        </section>
+
+        <form id="search-form" class="search-form">
+          <label class="field-label" for="location-input">WHERE TO?</label>
+          <div class="search-box">
+            <span class="search-pin" aria-hidden="true">⌖</span>
+            <input id="location-input" type="search" placeholder="Search a place or trail" autocomplete="off" required />
+            <button class="icon-button search-button" type="submit" aria-label="Search location" title="Search">↗</button>
+          </div>
+          <button class="text-button" id="near-me" type="button"><span aria-hidden="true">◎</span> Use my location</button>
+        </form>
+
+        <section class="plan-fields" aria-label="Trip details">
+          <div class="field-group">
+            <label class="field-label" for="trip-date">HIKE DATE</label>
+            <input id="trip-date" class="input-field" type="date" />
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="start-time">START TIME</label>
+            <input id="start-time" class="input-field" type="time" value="08:00" />
+          </div>
+          <div class="field-group duration-field">
+            <label class="field-label" for="hike-hours">TIME OUT</label>
+            <select id="hike-hours" class="input-field">
+              <option value="2">A quick 2 hours</option>
+              <option value="4" selected>Half day · 4 hours</option>
+              <option value="6">Most of the day · 6 hours</option>
+              <option value="8">All day · 8 hours</option>
+            </select>
+          </div>
+        </section>
+        <p class="daylight-note" id="daylight-note">Search a place to check local daylight.</p>
+
+        <section class="weather-strip" id="weather-panel" aria-live="polite">
+          <div class="weather-icon" id="weather-icon" aria-hidden="true">☀</div>
+          <div class="weather-copy"><span class="field-label">TRAIL WEATHER</span><strong id="weather-summary">Search a place to check</strong></div>
+          <span class="weather-temp" id="weather-temp">--°</span>
+        </section>
+
+        <section class="gear-panel" id="gear-panel">
+          <div class="section-heading"><span class="field-label">PACK FOR THE DAY</span><span class="tiny-mark">01—04</span></div>
+          <ul class="gear-list" id="gear-list"><li>Water &amp; a good pair of shoes</li><li>Weather tips appear with your forecast</li></ul>
+        </section>
+
+        <section class="cost-panel">
+          <div class="section-heading"><span class="field-label">DRIVE COST ESTIMATE</span><span class="tiny-mark">OPTIONAL</span></div>
+          <div class="cost-inputs">
+            <label><span>Road miles</span><input id="road-miles" type="number" min="0" value="0" aria-label="Road miles" /></label>
+            <label><span>MPG</span><input id="mpg" type="number" min="1" value="28" aria-label="Vehicle miles per gallon" /></label>
+            <label><span>$/gal</span><input id="fuel-price" type="number" min="0" step="0.01" value="3.50" aria-label="Fuel price per gallon" /></label>
+          </div>
+          <p class="fuel-total">Estimated fuel <strong id="fuel-total">$0.00</strong><span>round trip</span></p>
+        </section>
+
+        <section class="saved-section">
+          <div class="saved-tabs" role="tablist" aria-label="Saved plans">
+            <button class="saved-tab active" type="button" role="tab" aria-selected="true" data-tab="favorites">FAVORITES <span id="favorite-count">0</span></button>
+            <button class="saved-tab" type="button" role="tab" aria-selected="false" data-tab="trips">TRIP LOG <span id="trip-count">0</span></button>
+          </div>
+          <div id="saved-list" class="saved-list"><p class="empty-saved">Your saved places will live here.</p></div>
+        </section>
+
+        <footer class="sidebar-footer"><span>TAKE ONLY MEMORIES</span><span>LEAVE ONLY FOOTPRINTS</span></footer>
+      </aside>
+
+      <section class="map-panel" aria-label="Trail map and nearby places">
+        <div id="map" role="application" aria-label="Interactive map"></div>
+        <div class="map-topline">
+          <div class="map-location"><span class="live-dot"></span><span id="map-place">READY WHEN YOU ARE</span></div>
+          <div class="map-actions"><button id="save-place" class="map-action" type="button" title="Save this destination" aria-label="Save this destination">☆</button><button id="log-trip" class="map-action log-action" type="button" title="Add this plan to trip log"><span aria-hidden="true">＋</span> LOG TRIP</button></div>
+        </div>
+        <div class="map-legend"><span><i class="legend-dot trail-dot"></i>TRAILS</span><span><i class="legend-dot stay-dot"></i>STAYS</span><span><i class="legend-dot spot-dot"></i>PLACES</span></div>
+        <div class="results-dock">
+          <div class="dock-head"><div><p class="eyebrow">OUT THERE, NEARBY</p><h2 id="results-title">A good place to start</h2></div><span class="result-count" id="result-count">0 PLACES</span></div>
+          <div class="result-list" id="result-list"><div class="empty-results"><span class="empty-sun">✳</span><p>Search a destination to find trails,<br />places to stay, and local favorites.</p></div></div>
+          <p class="traffic-note" id="traffic-note"><span aria-hidden="true">ⓘ</span> Live traffic is not connected. Check local road conditions before you go.</p>
+        </div>
+        <div class="map-credit">MAP DATA © OPENSTREETMAP CONTRIBUTORS</div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="app.js"></script>
+  </body>
+</html>
