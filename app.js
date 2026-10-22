@@ -1,10 +1,15 @@
+
 const DEFAULT_CENTER = [39.7392, -104.9903];
 const STORAGE_KEYS = { favorites: 'wilderpath:favorites', trips: 'wilderpath:trips' };
+
 const map = L.map('map', { zoomControl: false }).setView(DEFAULT_CENTER, 8);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
+  referrerPolicy: 'strict-origin-when-cross-origin',
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
+
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 const elements = {
@@ -402,11 +407,7 @@ function selectSavedItem(index) {
   const items = readStorage(savedTab === 'favorites' ? STORAGE_KEYS.favorites : STORAGE_KEYS.trips);
   const item = items[index];
   if (!item) return;
-  if (savedTab === 'favorites') {
-    setPlace(item);
-  } else {
-    setPlace(item);
-  }
+  setPlace(item);
 }
 
 function initializeDate() {
@@ -421,17 +422,56 @@ elements.searchForm.addEventListener('submit', event => {
   searchLocation(elements.locationInput.value);
 });
 
+// GO TO MY LOCATION
+// This only moves the map. It does not change the selected destination.
+
+function resetLocationButton() {
+  elements.nearMe.innerHTML =
+    '<span aria-hidden="true">◎</span> Go to my location';
+}
+
+resetLocationButton();
+
 elements.nearMe.addEventListener('click', () => {
-  if (!navigator.geolocation) return showToast('Location services are not available in this browser.');
-  elements.nearMe.textContent = 'Finding you…';
-  navigator.geolocation.getCurrentPosition(position => {
-    elements.nearMe.innerHTML = '<span aria-hidden="true">◎</span> Use my location';
-    const { latitude, longitude } = position.coords;
-    setPlace({ name: 'Your location', shortName: 'Your location', lat: latitude, lon: longitude });
-  }, () => {
-    elements.nearMe.innerHTML = '<span aria-hidden="true">◎</span> Use my location';
-    showToast('Could not access your location. Check browser permissions.');
-  }, { timeout: 10000, maximumAge: 300000 });
+  if (!navigator.geolocation) {
+    return showToast('Location services are not available in this browser.');
+  }
+
+  elements.nearMe.textContent = 'Finding your location…';
+  elements.nearMe.disabled = true;
+
+  navigator.geolocation.getCurrentPosition(
+    position => {
+      const { latitude, longitude } = position.coords;
+
+      // Center the map on the user's GPS position.
+      map.flyTo([latitude, longitude], 12, {
+        duration: 0.6
+      });
+
+      // Remove any old search text left by the previous feature.
+      if (elements.locationInput.value.trim().toLowerCase() === 'your location') {
+        elements.locationInput.value = '';
+      }
+
+      resetLocationButton();
+      elements.nearMe.disabled = false;
+
+      showToast('Map centered on your location.');
+    },
+    error => {
+      console.error('Geolocation failed:', error);
+
+      resetLocationButton();
+      elements.nearMe.disabled = false;
+
+      showToast('Could not access your location. Check browser permissions.');
+    },
+    {
+      timeout: 10000,
+      maximumAge: 300000
+    }
+  );
 });
 
 elements.resultList.addEventListener('click', event => {
@@ -446,6 +486,7 @@ map.on('popupopen', event => {
 
 elements.savePlace.addEventListener('click', toggleFavorite);
 elements.logTrip.addEventListener('click', logTrip);
+
 document.querySelectorAll('.saved-tab').forEach(button => button.addEventListener('click', () => {
   savedTab = button.dataset.tab;
   document.querySelectorAll('.saved-tab').forEach(tab => {
@@ -455,6 +496,7 @@ document.querySelectorAll('.saved-tab').forEach(button => button.addEventListene
   });
   renderSaved();
 }));
+
 elements.savedList.addEventListener('click', event => {
   const removeButton = event.target.closest('[data-remove-index]');
   if (removeButton) {
@@ -469,6 +511,7 @@ elements.savedList.addEventListener('click', event => {
   const button = event.target.closest('[data-saved-index]');
   if (button) selectSavedItem(Number(button.dataset.savedIndex));
 });
+
 [elements.roadMiles, elements.mpg, elements.fuelPrice].forEach(input => input.addEventListener('input', readFuelInputs));
 elements.tripDate.addEventListener('change', () => { if (currentPlace) loadWeather(currentPlace); });
 elements.startTime.addEventListener('change', () => { if (currentPlace) loadWeather(currentPlace); });
