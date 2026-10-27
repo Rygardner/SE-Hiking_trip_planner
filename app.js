@@ -187,7 +187,7 @@ async function loadNearby(place) {
   renderResults();
   const query = `[out:json][timeout:15];(way(around:7000,${place.lat},${place.lon})[highway~"^(path|footway|track)$"][name];relation(around:8000,${place.lat},${place.lon})[route=hiking];nwr(around:7000,${place.lat},${place.lon})[tourism~"^(hotel|motel|guest_house|hostel|camp_site|attraction)$"];nwr(around:6000,${place.lat},${place.lon})[leisure~"^(park|nature_reserve|picnic_table)$"];);out center geom 100;`;
   try {
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
+    const response = await fetch('https://overpass.kumi.systems/api/interpreter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: `data=${encodeURIComponent(query)}`,
