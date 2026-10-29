@@ -38,11 +38,14 @@ const elements = {
   mpg: document.querySelector('#mpg'),
   fuelPrice: document.querySelector('#fuel-price'),
   fuelTotal: document.querySelector('#fuel-total'),
+  routeNote: document.querySelector('#route-note'),
   sidebar: document.querySelector('.sidebar'),
 };
 
 const layers = L.layerGroup().addTo(map);
+const routeLayer = L.layerGroup().addTo(map);
 let currentPlace = null;
+let userPosition = null;
 let currentItems = [];
 let selectedItemId = null;
 let savedTab = 'favorites';
@@ -91,17 +94,9 @@ function lineLength(points) {
   return points.slice(1).reduce((total, point, index) => total + distanceBetween(points[index], point), 0);
 }
 
-function classify(tags = {}) {
-  if (tags.route === 'hiking' || tags.highway === 'path' || tags.highway === 'footway' || tags.highway === 'track') return 'trail';
-  if (tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'guest_house' || tags.tourism === 'hostel' || tags.tourism === 'camp_site') return 'stay';
-  return 'place';
-}
-
-function itemName(tags, category) {
+function itemName(tags) {
   if (tags.name) return tags.name;
-  if (category === 'trail') return tags.route === 'hiking' ? 'Hiking route' : `${tags.highway || 'walking'} trail`;
-  if (category === 'stay') return 'Local place to stay';
-  return tags.tourism === 'attraction' ? 'Local attraction' : 'Recreation spot';
+  return tags.route === 'hiking' ? 'Hiking route' : 'Unnamed trail';
 }
 
 function elementId(element) {
@@ -117,11 +112,10 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
 
-function markerIcon(category) {
-  const glyph = category === 'trail' ? '↗' : category === 'stay' ? '⌂' : '✳';
+function markerIcon() {
   return L.divIcon({
     className: '',
-    html: `<div class="custom-marker ${category === 'stay' ? 'hotel' : category === 'place' ? 'place' : ''}"><span>${glyph}</span></div>`,
+    html: '<div class="custom-marker"><span>↗</span></div>',
     iconSize: [25, 25],
     iconAnchor: [12, 24],
     popupAnchor: [0, -23],
@@ -133,16 +127,16 @@ function focusItem(id) {
   if (!item) return;
   selectedItemId = id;
   renderResults();
-  map.flyTo(item.center, Math.max(map.getZoom(), item.category === 'trail' ? 13 : 14), { duration: 0.55 });
+  map.flyTo(item.center, Math.max(map.getZoom(), 13), { duration: 0.55 });
   const layer = layers.getLayers().find(candidate => candidate.featureId === id);
   if (layer?.openPopup) layer.openPopup();
 }
 
 function renderResults() {
   const items = currentItems.slice(0, 45);
-  elements.resultCount.textContent = `${items.length} ${items.length === 1 ? 'PLACE' : 'PLACES'}`;
+  elements.resultCount.textContent = `${items.length} ${items.length === 1 ? 'TRAIL' : 'TRAILS'}`;
   if (!items.length) {
-    elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">✳</span><p>No mapped places showed up nearby. Try another search or a wider area.</p></div>';
+    elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">✳</span><p>No mapped hiking trails showed up nearby. Try another search or a wider area.</p></div>';
     return;
   }
   elements.resultList.innerHTML = items.map(item => `
@@ -155,28 +149,106 @@ function renderResults() {
 function drawItems(items) {
   layers.clearLayers();
   for (const item of items.slice(0, 100)) {
-    if (item.category === 'trail' && item.points.length > 1) {
-      const line = L.polyline(item.points, { color: '#54774b', weight: 3, opacity: 0.72, lineCap: 'round' }).addTo(layers);
+    if (item.lines.length) {
+      const line = L.polyline(item.lines, { color: '#54774b', weight: 3, opacity: 0.72, lineCap: 'round' }).addTo(layers);
       line.featureId = item.id;
       line.bindPopup(popupMarkup(item));
       continue;
     }
-    if (item.category === 'trail' && item.points.length === 1) item.center = item.points[0];
-    const marker = L.marker(item.center, { icon: markerIcon(item.category) }).addTo(layers);
+    const marker = L.marker(item.center, { icon: markerIcon() }).addTo(layers);
     marker.featureId = item.id;
     marker.bindPopup(popupMarkup(item));
     marker.on('click', () => { selectedItemId = item.id; renderResults(); });
   }
 }
 
-function detailFor(tags, category, length) {
-  if (category === 'trail') {
-    const difficulty = tags.sac_scale || tags.trail_visibility || 'Trail';
-    const estimated = length > 0 ? `${(length / 1609.344).toFixed(1)} mi · ~${Math.max(1, Math.round(length / 80))} min` : 'Route details vary';
-    return `${difficulty.replaceAll('_', ' ')} · ${estimated}`;
+function detailFor(difficulty, length) {
+  const estimated = length > 0 ? `${(length / 1609.344).toFixed(1)} mi · ~${Math.max(1, Math.round(length / 80))} min` : 'Route details vary';
+  return `${(difficulty || 'Trail').replaceAll('_', ' ')} · ${estimated}`;
+}
+
+const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter'];
+// The server gets OVERPASS_TIMEOUT seconds; the browser waits a bit longer, then tries the next endpoint.
+const OVERPASS_TIMEOUT = 45;
+const OVERPASS_CLIENT_TIMEOUT_MS = (OVERPASS_TIMEOUT + 5) * 1000;
+const TRAIL_SEARCH_RADIUS = 8000;
+const TRAIL_CACHE_KEY = 'wilderpath:trail-cache';
+const TRAIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+const TRAIL_CACHE_LIMIT = 25;
+
+// Searches snap to a ~1 km grid so nearby lookups share one cached result.
+function trailCacheKey(place) {
+  return `${place.lat.toFixed(2)},${place.lon.toFixed(2)}`;
+}
+
+function readTrailCache() {
+  try { return JSON.parse(localStorage.getItem(TRAIL_CACHE_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function getCachedTrails(key) {
+  const entry = readTrailCache()[key];
+  return entry && Date.now() - entry.savedAt < TRAIL_CACHE_TTL ? entry.trails : null;
+}
+
+function setCachedTrails(key, trails) {
+  const cache = readTrailCache();
+  cache[key] = { savedAt: Date.now(), trails };
+  const newest = Object.entries(cache).sort((a, b) => b[1].savedAt - a[1].savedAt).slice(0, TRAIL_CACHE_LIMIT);
+  try { localStorage.setItem(TRAIL_CACHE_KEY, JSON.stringify(Object.fromEntries(newest))); }
+  catch (error) { console.warn('Trail cache is full, skipping save:', error); }
+}
+
+function trailQuery(lat, lon) {
+  const area = `around:${TRAIL_SEARCH_RADIUS},${lat},${lon}`;
+  // Paths need full geometry to draw; long-distance routes only need a marker, so they skip it.
+  return `[out:json][timeout:${OVERPASS_TIMEOUT}];way(${area})[highway=path][name];out geom qt 150;relation(${area})[route=hiking];out center qt 30;`;
+}
+
+async function fetchOverpass(query) {
+  let lastError;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(OVERPASS_CLIENT_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`Trail search returned ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+    }
   }
-  if (category === 'stay') return tags.tourism.replaceAll('_', ' ');
-  return (tags.leisure || tags.tourism || tags.amenity || 'recreation').replaceAll('_', ' ');
+  throw lastError;
+}
+
+const roundPoint = ([lat, lon]) => [Number(lat.toFixed(5)), Number(lon.toFixed(5))];
+
+// OSM splits long trails into many ways; merge them by name so each trail is listed once.
+function buildTrails(overpassElements) {
+  const trails = new Map();
+  for (const element of overpassElements) {
+    const tags = element.tags || {};
+    const points = getCoords(element).map(roundPoint);
+    if (!points.length) continue;
+    const key = tags.name ? `name:${tags.name.toLowerCase()}` : elementId(element);
+    const trail = trails.get(key) || { id: elementId(element), name: itemName(tags), difficulty: '', lines: [], point: null };
+    trail.difficulty ||= tags.sac_scale || tags.trail_visibility || '';
+    if (points.length > 1) trail.lines.push(points);
+    else trail.point ||= points[0];
+    trails.set(key, trail);
+  }
+  return [...trails.values()];
+}
+
+function trailToItem(trail, place) {
+  const longest = trail.lines.reduce((best, line) => (line.length > best.length ? line : best), []);
+  const center = longest.length ? longest[Math.floor(longest.length / 2)] : trail.point;
+  const length = trail.lines.reduce((total, line) => total + lineLength(line), 0);
+  const distance = distanceBetween([place.lat, place.lon], center);
+  return { ...trail, center, length, distanceValue: distance, distance: `${formatDistance(distance)} away`, label: 'TRAIL', detail: detailFor(trail.difficulty, length) };
 }
 
 async function loadNearby(place) {
@@ -185,40 +257,72 @@ async function loadNearby(place) {
   currentItems = [];
   selectedItemId = null;
   renderResults();
-  const query = `[out:json][timeout:15];(way(around:7000,${place.lat},${place.lon})[highway~"^(path|footway|track)$"][name];relation(around:8000,${place.lat},${place.lon})[route=hiking];nwr(around:7000,${place.lat},${place.lon})[tourism~"^(hotel|motel|guest_house|hostel|camp_site|attraction)$"];nwr(around:6000,${place.lat},${place.lon})[leisure~"^(park|nature_reserve|picnic_table)$"];);out center geom 100;`;
+  const cacheKey = trailCacheKey(place);
   try {
-    const response = await fetch('https://overpass.kumi.systems/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: `data=${encodeURIComponent(query)}`,
-    });
-    if (!response.ok) throw new Error(`Nearby search returned ${response.status}`);
-    const data = await response.json();
-    const seen = new Set();
-    currentItems = (data.elements || []).map(element => {
-      const tags = element.tags || {};
-      const category = classify(tags);
-      const points = getCoords(element);
-      if (!points.length) return null;
-      const id = elementId(element);
-      if (seen.has(id)) return null;
-      seen.add(id);
-      const center = points.length > 1 ? points[Math.floor(points.length / 2)] : points[0];
-      const length = category === 'trail' ? lineLength(points) : 0;
-      const distance = distanceBetween([place.lat, place.lon], center);
-      return { id, name: itemName(tags, category), category, points, center, length, distanceValue: distance, distance: `${formatDistance(distance)} away`, label: category === 'trail' ? 'TRAIL' : category === 'stay' ? 'STAY' : 'NEARBY', detail: detailFor(tags, category, length) };
-    }).filter(Boolean).sort((a, b) => {
-      const rank = { trail: 0, place: 1, stay: 2 };
-      return rank[a.category] - rank[b.category] || a.distanceValue - b.distanceValue;
-    });
+    let trails = getCachedTrails(cacheKey);
+    if (!trails) {
+      const [lat, lon] = cacheKey.split(',');
+      const data = await fetchOverpass(trailQuery(lat, lon));
+      trails = buildTrails(data.elements || []);
+      setCachedTrails(cacheKey, trails);
+    }
+    if (place !== currentPlace) return;
+    currentItems = trails.map(trail => trailToItem(trail, place)).sort((a, b) => a.distanceValue - b.distanceValue);
     drawItems(currentItems);
     renderResults();
   } catch (error) {
-    console.error('Nearby search failed:', error);
-    elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">!</span><p>Nearby map data could not load right now. Check your connection and try again.</p></div>';
+    console.error('Trail search failed:', error);
+    elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">!</span><p>Trail data could not load right now. Check your connection and try again.</p></div>';
     elements.resultCount.textContent = 'MAP DATA OFFLINE';
   } finally {
     elements.sidebar.classList.remove('loading');
+  }
+}
+
+const ORS_API_KEY = window.WILDERPATH_CONFIG?.orsApiKey || '';
+
+function formatDuration(seconds) {
+  const totalMinutes = Math.max(1, Math.round(seconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours ? `${hours} hr ${minutes} min` : `${minutes} min`;
+}
+
+// Draws the drive from the user's GPS position to the destination and fills in road miles.
+async function loadDriveRoute(place) {
+  routeLayer.clearLayers();
+  if (!ORS_API_KEY) {
+    elements.routeNote.textContent = 'Add an OpenRouteService key in config.js to see the driving route.';
+    return;
+  }
+  if (!userPosition) {
+    elements.routeNote.textContent = 'Use “Go to my location” to get a driving route here.';
+    return;
+  }
+  elements.routeNote.textContent = 'Finding a driving route…';
+  try {
+    const params = new URLSearchParams({
+      api_key: ORS_API_KEY,
+      start: `${userPosition.lon},${userPosition.lat}`,
+      end: `${place.lon},${place.lat}`,
+    });
+    const response = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?${params}`);
+    if (!response.ok) throw new Error(`Route returned ${response.status}`);
+    const data = await response.json();
+    if (place !== currentPlace) return;
+    const feature = data.features?.[0];
+    if (!feature) throw new Error('No route found');
+    const points = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+    L.polyline(points, { color: '#3d5a80', weight: 4, opacity: 0.75, dashArray: '6 6' }).addTo(routeLayer);
+    const { distance, duration } = feature.properties.summary;
+    const oneWayMiles = distance / 1609.344;
+    elements.roadMiles.value = Math.round(oneWayMiles * 2);
+    readFuelInputs();
+    elements.routeNote.textContent = `Drive ${formatDuration(duration)} · ${formatDistance(distance)} each way. Road miles set to the round trip.`;
+  } catch (error) {
+    if (place !== currentPlace) return;
+    console.error('Driving route failed:', error);
+    elements.routeNote.textContent = 'Driving route unavailable. Enter road miles by hand.';
   }
 }
 
@@ -337,6 +441,7 @@ function setPlace(place) {
   map.flyTo([place.lat, place.lon], 12, { duration: 0.6 });
   loadNearby(place);
   loadWeather(place);
+  loadDriveRoute(place);
   updateSaveButton();
   if (window.innerWidth <= 800) document.querySelector('.map-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -443,6 +548,8 @@ elements.nearMe.addEventListener('click', () => {
   navigator.geolocation.getCurrentPosition(
     position => {
       const { latitude, longitude } = position.coords;
+      userPosition = { lat: latitude, lon: longitude };
+      if (currentPlace) loadDriveRoute(currentPlace);
 
       // Center the map on the user's GPS position.
       map.flyTo([latitude, longitude], 12, {
