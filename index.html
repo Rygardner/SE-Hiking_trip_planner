@@ -95,8 +95,9 @@
         <div id="map" role="application" aria-label="Interactive map"></div>
         <div class="map-topline">
           <div class="map-location"><span class="live-dot"></span><span id="map-place">READY WHEN YOU ARE</span></div>
-          <div class="map-actions"><button id="save-place" class="map-action" type="button" title="Save this destination" aria-label="Save this destination">☆</button><button id="log-trip" class="map-action log-action" type="button" title="Add this plan to trip log"><span aria-hidden="true">＋</span> LOG TRIP</button></div>
+          <div class="map-actions"><button id="save-place" class="map-action" type="button" title="Save this destination" aria-label="Save this destination">☆</button><button id="plan-trip" class="map-action log-action" type="button" title="Open the trip planner"><span aria-hidden="true">＋</span> PLAN TRIP<span class="plan-badge" id="plan-badge" hidden>0</span></button></div>
         </div>
+        <aside class="trail-sheet" id="trail-sheet" role="dialog" aria-labelledby="trail-sheet-title" hidden></aside>
         <div class="map-legend"><span><i class="legend-dot trail-dot"></i>HIKING TRAILS</span></div>
         <div class="results-dock">
           <div class="dock-head"><div><p class="eyebrow">OUT THERE, NEARBY</p><h2 id="results-title">A good place to start</h2></div><span class="result-count" id="result-count">0 TRAILS</span></div>
@@ -107,6 +108,27 @@
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
       </section>
     </main>
+
+    <dialog class="planner" id="planner" aria-labelledby="planner-title">
+      <header class="planner-head">
+        <div><p class="eyebrow">TRIP PLANNER</p><h2 id="planner-title">Plan a trip</h2></div>
+        <button class="sheet-close" type="button" id="planner-close" aria-label="Close trip planner">×</button>
+      </header>
+      <div class="planner-fields">
+        <label class="field-group"><span class="field-label">TRIP NAME</span><input id="plan-name" class="input-field" type="text" maxlength="60" placeholder="Weekend in the hills" /></label>
+        <label class="field-group"><span class="field-label">START DATE</span><input id="plan-start" class="input-field" type="date" /></label>
+      </div>
+      <div class="planner-summary" id="plan-summary"></div>
+      <ol class="plan-days" id="plan-days"></ol>
+      <footer class="planner-foot">
+        <button class="ghost-button" type="button" id="plan-add-day">＋ Add day</button>
+        <p class="plan-status" id="plan-status" role="status" aria-live="polite"></p>
+        <div class="planner-foot-actions">
+          <button class="ghost-button" type="button" id="plan-new">Start over</button>
+          <button class="primary-button" type="button" id="plan-save">Save to trip log</button>
+        </div>
+      </footer>
+    </dialog>
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="config.js"></script>

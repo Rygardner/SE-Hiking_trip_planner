@@ -117,11 +117,98 @@ h1 em { color: var(--green); font-weight: 500; }
 .toast.visible { opacity: 1; transform: translate(-50%, 0); }
 .custom-marker { width: 25px; height: 25px; display: grid; place-items: center; border: 2px solid white; border-radius: 50% 50% 50% 2px; background: var(--green); color: white; font-size: 11px; transform: rotate(-45deg); box-shadow: 0 2px 6px #183c3260; }
 .custom-marker span { transform: rotate(45deg); }
+.custom-marker.selected { background: var(--coral); }
 .custom-marker.hotel { background: var(--coral); }.custom-marker.place { background: #c39b47; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #f7f6f0; }
 .leaflet-popup-content { color: var(--ink); font-size: 11px; }
 .leaflet-popup-content strong { display: block; margin-bottom: 4px; }
 .leaflet-popup-content button { padding: 4px 7px; border: 0; border-radius: 2px; background: var(--green); color: white; font-size: 9px; cursor: pointer; }
+
+/* Plan trip button badge */
+.plan-badge { margin-left: 6px; padding: 1px 5px; border-radius: 8px; background: var(--coral); color: white; font-size: 8px; }
+.plan-badge[hidden] { display: none; }
+
+/* Shared buttons */
+.primary-button, .ghost-button { height: 32px; padding: 0 12px; border-radius: 2px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .18s, border-color .18s; }
+.primary-button { border: 0; background: var(--green); color: white; }
+.primary-button:hover { background: #244a38; }
+.ghost-button { border: 1px solid var(--line); background: #fbfbf7; color: var(--green); }
+.ghost-button:hover { border-color: #78916f; }
+.ghost-button:disabled { opacity: .6; cursor: wait; }
+.sheet-close { width: 28px; height: 28px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 2px; background: #fbfbf7; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
+.sheet-close:hover { color: var(--ink); border-color: #78916f; }
+.plan-day .remove-saved { padding: 0 5px; border: 0; background: transparent; color: #8d9389; font-size: 15px; cursor: pointer; }
+.plan-day .remove-saved:hover { color: var(--coral); }
+.remove-saved:disabled { opacity: .3; cursor: default; }
+
+/* Trail details panel */
+.trail-sheet { position: absolute; z-index: 600; top: 68px; left: 20px; max-height: calc(100% - 296px); width: 330px; padding: 16px 16px 12px; overflow-y: auto; border: 1px solid #e5e4da; border-radius: 3px; background: #f7f6f0fa; box-shadow: 0 5px 25px #30473526; }
+.trail-sheet[hidden] { display: none; }
+.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.sheet-head .eyebrow { margin-bottom: 4px; }
+.sheet-head h3 { margin: 0; font-family: 'Fraunces', Georgia, serif; font-size: 20px; font-weight: 500; line-height: 1.15; }
+.sheet-stats { margin-top: 14px; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.sheet-stats div { padding: 9px 6px; }
+.sheet-stats div + div { border-left: 1px solid var(--line); }
+.sheet-stats strong { display: block; font-size: 13px; font-weight: 600; }
+.sheet-stats span, .plan-stat span { display: block; margin-top: 3px; color: #8c9588; font-family: var(--mono); font-size: 7px; letter-spacing: .45px; }
+.sheet-note { margin: 9px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.sheet-elevation { margin-top: 12px; }
+.sheet-elevation p { margin: 4px 0 0; font-size: 11px; }
+.sheet-facts { margin: 12px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.sheet-facts dt { color: #8c9588; font-size: 9px; }
+.sheet-facts dd { margin: 2px 0 0; font-size: 11px; }
+.sheet-description { margin: 12px 0 0; padding-left: 9px; border-left: 2px solid var(--lime); color: #536452; font-size: 10px; line-height: 1.5; }
+.sheet-plan { margin-top: 14px; padding: 11px; border: 1px solid var(--line); border-radius: 2px; background: #fbfbf7; }
+.sheet-plan p { margin: 0 0 8px; font-size: 11px; }
+.sheet-plan-row { margin-top: 6px; display: flex; gap: 7px; }
+.sheet-plan-row .input-field { height: 32px; margin: 0; }
+.sheet-links { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.sheet-links a { color: var(--green); font-size: 10px; font-weight: 600; text-decoration: none; }
+.sheet-links a:hover { text-decoration: underline; }
+.sheet-fine { margin: 10px 0 0; color: #9aa196; font-size: 8px; line-height: 1.4; }
+
+/* Planned stops on the map */
+.plan-stop { min-width: 22px; height: 22px; padding: 0 6px; display: grid; place-items: center; border: 2px solid white; border-radius: 11px; background: var(--coral); color: white; font-family: var(--mono); font-size: 10px; white-space: nowrap; box-shadow: 0 2px 6px #183c3260; transform: translate(-50%, -50%); cursor: pointer; }
+
+/* Trip planner dialog */
+.planner { width: min(640px, calc(100vw - 24px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #e5e4da; border-radius: 3px; background: var(--paper); color: var(--ink); box-shadow: 0 12px 40px #18302633; }
+.planner[open] { display: flex; flex-direction: column; }
+.planner::backdrop { background: #183c3259; backdrop-filter: blur(2px); }
+.planner-head { padding: 18px 22px 12px; display: flex; align-items: flex-start; justify-content: space-between; }
+.planner-head .eyebrow { margin-bottom: 4px; }
+.planner-head h2 { margin: 0; font-family: 'Fraunces', Georgia, serif; font-size: 24px; font-weight: 500; }
+.planner-fields { padding: 0 22px 12px; display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; }
+.planner-summary { padding: 0 22px 12px; border-bottom: 1px solid var(--line); }
+.plan-stats { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--line); border-radius: 2px; background: linear-gradient(105deg, #e7eadf, #f1f0e8 72%); }
+.plan-stat { padding: 9px 10px; }
+.plan-stat + .plan-stat { border-left: 1px solid var(--line); }
+.plan-stat strong { font-family: 'Fraunces', Georgia, serif; font-size: 20px; font-weight: 500; }
+.plan-note { margin: 7px 0 0; color: #8c9588; font-size: 9px; }
+.plan-note .text-button { padding: 0 0 0 4px; font-size: 9px; font-weight: 600; }
+.plan-days { flex: 1; min-height: 120px; margin: 0; padding: 12px 22px; overflow-y: auto; list-style: none; display: grid; align-content: start; gap: 10px; }
+.plan-day { padding: 12px 13px; border: 1px solid #dce0d5; border-radius: 2px; background: #fbfaf5; }
+.plan-day-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.plan-day-head strong { display: block; margin-top: 3px; font-size: 14px; font-weight: 600; }
+.plan-leg { margin: 6px 0 0; color: #c0663f; font-family: var(--mono); font-size: 9px; }
+.plan-dest-form { margin-top: 8px; display: flex; gap: 6px; }
+.plan-dest-form .input-field { height: 30px; margin: 0; }
+.plan-dest-form .ghost-button { height: 30px; }
+.plan-day > .text-button { padding-top: 6px; }
+.plan-trails { margin: 10px 0 0; padding: 0; list-style: none; border-top: 1px solid #e2e4dc; }
+.plan-trail { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #e2e4dc; }
+.plan-trail-open { min-width: 0; flex: 1; padding: 7px 0; border: 0; background: none; text-align: left; cursor: pointer; }
+.plan-trail-open strong { display: block; overflow: hidden; color: #244737; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.plan-trail-open span { display: block; margin-top: 2px; color: #849082; font-size: 9px; }
+.plan-trail-open:hover strong { color: var(--coral); }
+.plan-hint { margin: 10px 0 0; color: #929b90; font-size: 10px; }
+.plan-day-foot { margin-top: 9px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: #6b786b; font-size: 10px; }
+.plan-day-foot .text-button { margin-left: auto; padding: 0; font-weight: 600; }
+.plan-warn { color: #c0663f; font-weight: 600; }
+.planner-foot { padding: 12px 22px 16px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); }
+.planner-foot-actions { margin-left: auto; display: flex; gap: 7px; }
+.plan-status { margin: 0; color: var(--green); font-size: 10px; font-weight: 600; }
+
 .loading .live-dot { animation: pulse 1.3s infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px #a8bd6300; } }
 @media (min-width: 1450px) { .sidebar { padding-right: 38px; padding-left: 38px; }.intro { padding-top: 42px; }.results-dock { right: 25px; bottom: 22px; left: 25px; padding: 20px 22px 13px; } }
@@ -142,5 +229,13 @@ h1 em { color: var(--green); font-weight: 500; }
   .results-dock { right: 9px; bottom: 9px; left: 9px; padding: 13px 12px 9px; }
   .map-credit { bottom: 222px; right: 10px; }
   .dock-head h2 { font-size: 20px; }
+  .trail-sheet { top: 58px; right: 9px; left: 9px; width: auto; max-height: calc(100% - 280px); }
+  .planner { max-height: calc(100vh - 16px); }
+  .planner-head, .planner-fields, .planner-summary, .plan-days, .planner-foot { padding-right: 14px; padding-left: 14px; }
+  .planner-fields { grid-template-columns: 1fr; }
+  .plan-stats { grid-template-columns: repeat(3, 1fr); }
+  .plan-stat:nth-child(4) { border-left: 0; }
+  .plan-stat:nth-child(n + 4) { border-top: 1px solid var(--line); }
+  .planner-foot { flex-wrap: wrap; }
 }
 @media (max-width: 380px) { .sidebar { padding-right: 15px; padding-left: 15px; }.map-location { padding: 9px; font-size: 8px; }.map-action { height: 34px; min-width: 34px; padding: 0 8px; }.log-action { font-size: 8px; }.map-legend { gap: 8px; font-size: 7px; } }

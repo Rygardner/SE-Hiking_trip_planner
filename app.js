@@ -32,7 +32,19 @@ const elements = {
   favoriteCount: document.querySelector('#favorite-count'),
   tripCount: document.querySelector('#trip-count'),
   savePlace: document.querySelector('#save-place'),
-  logTrip: document.querySelector('#log-trip'),
+  planTrip: document.querySelector('#plan-trip'),
+  planBadge: document.querySelector('#plan-badge'),
+  trailSheet: document.querySelector('#trail-sheet'),
+  planner: document.querySelector('#planner'),
+  plannerClose: document.querySelector('#planner-close'),
+  planName: document.querySelector('#plan-name'),
+  planStart: document.querySelector('#plan-start'),
+  planSummary: document.querySelector('#plan-summary'),
+  planDays: document.querySelector('#plan-days'),
+  planAddDay: document.querySelector('#plan-add-day'),
+  planNew: document.querySelector('#plan-new'),
+  planSave: document.querySelector('#plan-save'),
+  planStatus: document.querySelector('#plan-status'),
   toast: document.querySelector('#toast'),
   roadMiles: document.querySelector('#road-miles'),
   mpg: document.querySelector('#mpg'),
@@ -44,6 +56,8 @@ const elements = {
 
 const layers = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
+const planLayer = L.layerGroup().addTo(map);
+const highlightLayer = L.layerGroup().addTo(map);
 let currentPlace = null;
 let userPosition = null;
 let currentItems = [];
@@ -103,33 +117,46 @@ function elementId(element) {
   return `${element.type}-${element.id}`;
 }
 
-function popupMarkup(item) {
-  const safeName = escapeHtml(item.name);
-  return `<strong>${safeName}</strong><span>${escapeHtml(item.label)}${item.distance ? ` · ${escapeHtml(item.distance)}` : ''}</span><br /><button type="button" data-focus-item="${escapeHtml(item.id)}">View details</button>`;
-}
-
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
 
-function markerIcon() {
+function markerIcon(selected = false) {
   return L.divIcon({
     className: '',
-    html: '<div class="custom-marker"><span>↗</span></div>',
+    html: `<div class="custom-marker${selected ? ' selected' : ''}"><span>↗</span></div>`,
     iconSize: [25, 25],
     iconAnchor: [12, 24],
     popupAnchor: [0, -23],
   });
 }
 
-function focusItem(id) {
+// Selects a trail, highlights it, and opens its details panel. `fly` moves the map to it.
+function focusItem(id, { fly = true } = {}) {
   const item = currentItems.find(candidate => candidate.id === id);
   if (!item) return;
   selectedItemId = id;
+  highlightLayer.clearLayers();
   renderResults();
-  map.flyTo(item.center, Math.max(map.getZoom(), 13), { duration: 0.55 });
-  const layer = layers.getLayers().find(candidate => candidate.featureId === id);
-  if (layer?.openPopup) layer.openPopup();
+  highlightSelection();
+  if (fly) map.flyTo(item.center, Math.max(map.getZoom(), 13), { duration: 0.55 });
+  openTrailDetails(item);
+}
+
+const TRAIL_STYLE = { color: '#54774b', weight: 3, opacity: 0.72 };
+const SELECTED_TRAIL_STYLE = { color: '#d7765a', weight: 5, opacity: 0.95 };
+
+function highlightSelection() {
+  layers.eachLayer(layer => {
+    const selected = layer.featureId === selectedItemId;
+    if (layer.setIcon) {
+      layer.setIcon(markerIcon(selected));
+      layer.setZIndexOffset(selected ? 1000 : 0);
+      return;
+    }
+    layer.setStyle(selected ? SELECTED_TRAIL_STYLE : TRAIL_STYLE);
+    if (selected) layer.bringToFront();
+  });
 }
 
 function renderResults() {
@@ -149,22 +176,43 @@ function renderResults() {
 function drawItems(items) {
   layers.clearLayers();
   for (const item of items.slice(0, 100)) {
-    if (item.lines.length) {
-      const line = L.polyline(item.lines, { color: '#54774b', weight: 3, opacity: 0.72, lineCap: 'round' }).addTo(layers);
-      line.featureId = item.id;
-      line.bindPopup(popupMarkup(item));
-      continue;
+    // Every trail gets a pin at its midpoint; mapped paths also get their line.
+    const trailLayers = [L.marker(item.center, { icon: markerIcon(), title: item.name })];
+    if (item.lines.length) trailLayers.unshift(L.polyline(item.lines, { ...TRAIL_STYLE, lineCap: 'round' }));
+    for (const layer of trailLayers) {
+      layer.featureId = item.id;
+      layer.on('click', () => focusItem(item.id, { fly: false }));
+      layer.addTo(layers);
     }
-    const marker = L.marker(item.center, { icon: markerIcon() }).addTo(layers);
-    marker.featureId = item.id;
-    marker.bindPopup(popupMarkup(item));
-    marker.on('click', () => { selectedItemId = item.id; renderResults(); });
   }
 }
 
+// OSM sac_scale values, from easiest to hardest.
+const DIFFICULTY = {
+  hiking: { label: 'Easy', note: 'Well-marked path. Trail runners are fine.' },
+  mountain_hiking: { label: 'Moderate', note: 'Some steep or uneven sections. Hiking boots recommended.' },
+  demanding_mountain_hiking: { label: 'Challenging', note: 'Exposed spots; you may need hands for balance.' },
+  alpine_hiking: { label: 'Difficult', note: 'Scrambling and route-finding. Experience needed.' },
+  demanding_alpine_hiking: { label: 'Very difficult', note: 'Alpine terrain. Climbing experience required.' },
+  difficult_alpine_hiking: { label: 'Expert', note: 'Technical alpine terrain.' },
+};
+
+function difficultyInfo(sacScale) {
+  return DIFFICULTY[sacScale] || { label: 'Not rated', note: 'No difficulty rating is mapped for this trail.' };
+}
+
+const metersToMiles = meters => meters / 1609.344;
+const metersToFeet = meters => meters * 3.28084;
+
+// "Book time": 2 mph on the flat plus 30 minutes per 1,000 ft of climbing.
+function hikeMinutes(lengthMeters, climbFeet = 0) {
+  return metersToMiles(lengthMeters) / 2 * 60 + climbFeet / 1000 * 30;
+}
+
 function detailFor(difficulty, length) {
-  const estimated = length > 0 ? `${(length / 1609.344).toFixed(1)} mi · ~${Math.max(1, Math.round(length / 80))} min` : 'Route details vary';
-  return `${(difficulty || 'Trail').replaceAll('_', ' ')} · ${estimated}`;
+  const label = DIFFICULTY[difficulty]?.label || 'Trail';
+  if (!(length > 0)) return `${label} · Route details vary`;
+  return `${label} · ${metersToMiles(length).toFixed(1)} mi · ~${formatDuration(hikeMinutes(length) * 60)}`;
 }
 
 const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter'];
@@ -172,7 +220,9 @@ const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'ht
 const OVERPASS_TIMEOUT = 45;
 const OVERPASS_CLIENT_TIMEOUT_MS = (OVERPASS_TIMEOUT + 5) * 1000;
 const TRAIL_SEARCH_RADIUS = 8000;
-const TRAIL_CACHE_KEY = 'wilderpath:trail-cache';
+// v2 adds trail tags for the details panel; older caches lack them, so drop them.
+const TRAIL_CACHE_KEY = 'wilderpath:trail-cache:v2';
+localStorage.removeItem('wilderpath:trail-cache');
 const TRAIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 const TRAIL_CACHE_LIMIT = 25;
 
@@ -226,6 +276,9 @@ async function fetchOverpass(query) {
 
 const roundPoint = ([lat, lon]) => [Number(lat.toFixed(5)), Number(lon.toFixed(5))];
 
+// OSM tags shown in the trail details panel.
+const DETAIL_TAGS = ['sac_scale', 'trail_visibility', 'surface', 'dog', 'bicycle', 'horse', 'operator', 'description', 'website', 'wheelchair', 'fee', 'access'];
+
 // OSM splits long trails into many ways; merge them by name so each trail is listed once.
 function buildTrails(overpassElements) {
   const trails = new Map();
@@ -234,8 +287,10 @@ function buildTrails(overpassElements) {
     const points = getCoords(element).map(roundPoint);
     if (!points.length) continue;
     const key = tags.name ? `name:${tags.name.toLowerCase()}` : elementId(element);
-    const trail = trails.get(key) || { id: elementId(element), name: itemName(tags), difficulty: '', lines: [], point: null };
-    trail.difficulty ||= tags.sac_scale || tags.trail_visibility || '';
+    const trail = trails.get(key) || { id: elementId(element), name: itemName(tags), difficulty: '', tags: {}, osm: [], lines: [], point: null };
+    trail.difficulty ||= tags.sac_scale || '';
+    for (const tag of DETAIL_TAGS) if (tags[tag] && !trail.tags[tag]) trail.tags[tag] = tags[tag];
+    if (trail.osm.length < 5) trail.osm.push(`${element.type}/${element.id}`);
     if (points.length > 1) trail.lines.push(points);
     else trail.point ||= points[0];
     trails.set(key, trail);
@@ -256,6 +311,9 @@ async function loadNearby(place) {
   elements.resultTitle.textContent = `Around ${place.shortName}`;
   currentItems = [];
   selectedItemId = null;
+  layers.clearLayers();
+  highlightLayer.clearLayers();
+  closeTrailDetails();
   renderResults();
   const cacheKey = trailCacheKey(place);
   try {
@@ -409,20 +467,25 @@ function shortName(displayName) {
   return displayName.split(',')[0].trim() || displayName;
 }
 
+// Returns the best match for a search, or null when nothing matches.
+async function geocode(query) {
+  const params = new URLSearchParams({ q: query, format: 'jsonv2', limit: '1' });
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { headers: { 'Accept-Language': 'en' } });
+  if (!response.ok) throw new Error(`Location search returned ${response.status}`);
+  const [result] = await response.json();
+  if (!result) return null;
+  return { name: result.display_name, shortName: shortName(result.display_name), lat: Number(result.lat), lon: Number(result.lon) };
+}
+
 async function searchLocation(query) {
   if (!query.trim()) return;
   elements.sidebar.classList.add('loading');
   try {
-    const params = new URLSearchParams({ q: query, format: 'jsonv2', limit: '1' });
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { headers: { 'Accept-Language': 'en' } });
-    if (!response.ok) throw new Error(`Location search returned ${response.status}`);
-    const results = await response.json();
-    if (!results.length) {
+    const place = await geocode(query);
+    if (!place) {
       showToast('No match found. Try a nearby town or landmark.');
       return;
     }
-    const result = results[0];
-    const place = { name: result.display_name, shortName: shortName(result.display_name), lat: Number(result.lat), lon: Number(result.lon) };
     setPlace(place);
   } catch (error) {
     console.error('Location search failed:', error);
@@ -480,13 +543,12 @@ function toggleFavorite() {
   renderSaved();
 }
 
-function logTrip() {
-  if (!currentPlace) return showToast('Search a destination before logging a trip.');
-  const trips = readStorage(STORAGE_KEYS.trips);
-  trips.unshift({ ...currentPlace, date: elements.tripDate.value, hours: Number(elements.hikeHours.value), loggedAt: new Date().toISOString() });
-  saveStorage(STORAGE_KEYS.trips, trips.slice(0, 50));
-  renderSaved();
-  showToast('Trip added to your log.');
+// Trip log entries are either saved plans (with `days`) or one-place logs from before the planner.
+function tripLogMeta(item) {
+  if (!item.days) return `${item.date || 'Date not set'} · ${item.hours} hr plan`;
+  const totals = planTotals(item);
+  const days = `${item.days.length} ${item.days.length === 1 ? 'day' : 'days'}`;
+  return [item.startDate || 'Date not set', days, `${totals.trails} trails`, `${totals.miles.toFixed(1)} mi`].join(' · ');
 }
 
 function renderSaved() {
@@ -500,11 +562,10 @@ function renderSaved() {
     return;
   }
   elements.savedList.innerHTML = items.slice(0, 10).map((item, index) => {
-    const metadata = savedTab === 'favorites' ? 'Favorite destination' : `${item.date || 'Date not set'} · ${item.hours} hr plan`;
-    const action = savedTab === 'favorites'
-      ? `<button class="remove-saved" type="button" data-remove-index="${index}" aria-label="Remove ${escapeHtml(item.shortName)} from favorites">×</button>`
-      : '<span aria-hidden="true">↗</span>';
-    return `<div class="saved-item"><button class="saved-item-open" type="button" data-saved-index="${index}"><strong>${escapeHtml(item.shortName)}</strong><span>${escapeHtml(metadata)}</span></button>${action}</div>`;
+    const title = item.days ? item.name : item.shortName;
+    const metadata = savedTab === 'favorites' ? 'Favorite destination' : tripLogMeta(item);
+    const where = savedTab === 'favorites' ? 'favorites' : 'trip log';
+    return `<div class="saved-item"><button class="saved-item-open" type="button" data-saved-index="${index}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(metadata)}</span></button><button class="remove-saved" type="button" data-remove-index="${index}" aria-label="Remove ${escapeHtml(title)} from ${where}">×</button></div>`;
   }).join('');
 }
 
@@ -512,8 +573,564 @@ function selectSavedItem(index) {
   const items = readStorage(savedTab === 'favorites' ? STORAGE_KEYS.favorites : STORAGE_KEYS.trips);
   const item = items[index];
   if (!item) return;
+  if (item.days) {
+    setPlan(structuredClone(item));
+    openPlanner();
+    return;
+  }
   setPlace(item);
 }
+
+// ─── Trail details panel ────────────────────────────────────────────
+
+const ELEVATION_POINT_LIMIT = 100; // Open-Meteo accepts up to 100 points per request.
+const elevationCache = new Map(); // trail id → 'loading' | 'error' | { lowFt, highFt, climbFt }
+let sheetTrail = null;
+
+const VISIBILITY = { excellent: 'Excellent', good: 'Good', intermediate: 'Some gaps', bad: 'Hard to follow', horrible: 'Very hard to follow', no: 'No visible path' };
+const PERMISSION = { yes: 'Allowed', designated: 'Allowed', permissive: 'Allowed', no: 'Not allowed', private: 'Private', leashed: 'On leash', unleashed: 'Off leash OK', dismount: 'Walk bikes', limited: 'Limited' };
+
+const capitalize = value => value.charAt(0).toUpperCase() + value.slice(1);
+const tagText = value => PERMISSION[value] || capitalize(value.replaceAll('_', ' ').replaceAll(';', ', '));
+const formatFeet = feet => `${Math.round(feet).toLocaleString()} ft`;
+
+// Only allow http(s) links from map data.
+function safeUrl(value) {
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+  } catch { return null; }
+}
+
+function openTrailDetails(trail) {
+  sheetTrail = trail;
+  elements.trailSheet.hidden = false;
+  renderTrailSheet();
+  if (trail.lines?.length && !elevationCache.has(trail.id)) loadElevation(trail);
+}
+
+function closeTrailDetails() {
+  sheetTrail = null;
+  elements.trailSheet.hidden = true;
+  elements.trailSheet.innerHTML = '';
+  delete elements.trailSheet.dataset.trailId;
+}
+
+function trailElevation(trail) {
+  const cached = elevationCache.get(trail.id);
+  return typeof cached === 'object' ? cached : trail.elevation || null;
+}
+
+function samplePoints(line, count) {
+  if (line.length <= count) return line;
+  return Array.from({ length: count }, (_, index) => line[Math.round(index * (line.length - 1) / (count - 1))]);
+}
+
+// Samples points along the trail and asks Open-Meteo for their elevation.
+// Segment direction in OSM is arbitrary, so "climbing" is the larger of total up and total down.
+async function loadElevation(trail) {
+  elevationCache.set(trail.id, 'loading');
+  const lines = [...trail.lines].sort((a, b) => b.length - a.length).slice(0, 25);
+  const totalPoints = lines.reduce((sum, line) => sum + line.length, 0);
+  const spare = ELEVATION_POINT_LIMIT - lines.length * 2;
+  const samples = lines.map(line => samplePoints(line, 2 + Math.floor(spare * line.length / totalPoints)));
+  const points = samples.flat();
+  try {
+    const params = new URLSearchParams({
+      latitude: points.map(point => point[0]).join(','),
+      longitude: points.map(point => point[1]).join(','),
+    });
+    const response = await fetch(`https://api.open-meteo.com/v1/elevation?${params}`);
+    if (!response.ok) throw new Error(`Elevation returned ${response.status}`);
+    const { elevation } = await response.json();
+    if (!Array.isArray(elevation) || elevation.length !== points.length) throw new Error('Elevation data incomplete');
+    let offset = 0;
+    let up = 0;
+    let down = 0;
+    for (const sample of samples) {
+      const heights = elevation.slice(offset, offset + sample.length);
+      offset += sample.length;
+      for (let index = 1; index < heights.length; index += 1) {
+        const change = heights[index] - heights[index - 1];
+        if (change > 0) up += change;
+        else down -= change;
+      }
+    }
+    const result = {
+      lowFt: Math.round(metersToFeet(Math.min(...elevation))),
+      highFt: Math.round(metersToFeet(Math.max(...elevation))),
+      climbFt: Math.round(metersToFeet(Math.max(up, down))),
+    };
+    elevationCache.set(trail.id, result);
+    updatePlannedElevation(trail.id, result);
+  } catch (error) {
+    console.error('Elevation lookup failed:', error);
+    elevationCache.set(trail.id, 'error');
+  }
+  if (sheetTrail?.id === trail.id) renderTrailSheet();
+}
+
+function elevationText(trail) {
+  const elevation = trailElevation(trail);
+  if (elevation) return `${formatFeet(elevation.lowFt)} – ${formatFeet(elevation.highFt)} · ~${formatFeet(elevation.climbFt)} of climbing`;
+  const status = elevationCache.get(trail.id);
+  if (status === 'loading') return 'Checking elevation…';
+  if (status === 'error') return 'Elevation unavailable right now.';
+  return 'Elevation not loaded for this trail.';
+}
+
+function renderTrailSheet() {
+  const trail = sheetTrail;
+  if (!trail) return;
+  const tags = trail.tags || {};
+  const difficulty = difficultyInfo(trail.difficulty || tags.sac_scale);
+  const climb = trailElevation(trail)?.climbFt;
+  const hasLength = trail.length > 0;
+  const facts = [
+    currentPlace && trail.center && [`From ${currentPlace.shortName}`, formatDistance(distanceBetween([currentPlace.lat, currentPlace.lon], trail.center))],
+    ['Surface', tags.surface && tagText(tags.surface)],
+    ['Trail markings', tags.trail_visibility && (VISIBILITY[tags.trail_visibility] || tagText(tags.trail_visibility))],
+    ['Dogs', tags.dog && tagText(tags.dog)],
+    ['Bikes', tags.bicycle && tagText(tags.bicycle)],
+    ['Horses', tags.horse && tagText(tags.horse)],
+    ['Wheelchair', tags.wheelchair && tagText(tags.wheelchair)],
+    ['Fee', tags.fee && tagText(tags.fee)],
+    ['Access', tags.access && tagText(tags.access)],
+    ['Managed by', tags.operator],
+  ].filter(fact => fact && fact[1]);
+  const [lat, lon] = trail.center;
+  const links = [`<a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank" rel="noopener">Directions ↗</a>`];
+  if (trail.osm?.[0]) links.push(`<a href="https://www.openstreetmap.org/${escapeHtml(trail.osm[0])}" target="_blank" rel="noopener">OpenStreetMap ↗</a>`);
+  const website = tags.website && safeUrl(tags.website);
+  if (website) links.push(`<a href="${escapeHtml(website)}" target="_blank" rel="noopener">Website ↗</a>`);
+  // Re-renders (e.g. when elevation arrives) should keep the day the user already picked.
+  const pickedDay = elements.trailSheet.dataset.trailId === trail.id ? elements.trailSheet.querySelector('#sheet-day')?.value : null;
+  elements.trailSheet.dataset.trailId = trail.id;
+
+  elements.trailSheet.innerHTML = `
+    <header class="sheet-head">
+      <div><p class="eyebrow">TRAIL DETAILS</p><h3 id="trail-sheet-title">${escapeHtml(trail.name)}</h3></div>
+      <button class="sheet-close" type="button" data-sheet-action="close" aria-label="Close trail details">×</button>
+    </header>
+    <div class="sheet-stats">
+      <div><strong>${hasLength ? `${metersToMiles(trail.length).toFixed(1)} mi` : '—'}</strong><span>MAPPED LENGTH</span></div>
+      <div><strong>${hasLength ? `~${formatDuration(hikeMinutes(trail.length, climb) * 60)}` : '—'}</strong><span>EST. TIME</span></div>
+      <div><strong>${escapeHtml(difficulty.label)}</strong><span>DIFFICULTY</span></div>
+    </div>
+    <p class="sheet-note">${escapeHtml(difficulty.note)}</p>
+    <div class="sheet-elevation"><span class="field-label">ELEVATION</span><p>${escapeHtml(elevationText(trail))}</p></div>
+    ${facts.length ? `<dl class="sheet-facts">${facts.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>` : ''}
+    ${tags.description ? `<p class="sheet-description">${escapeHtml(tags.description)}</p>` : ''}
+    ${trailPlanMarkup(trail)}
+    <div class="sheet-links">${links.join('')}</div>
+    <p class="sheet-fine">Length is the total of mapped segments; time uses 2 mph plus 30 min per 1,000 ft of climbing.</p>`;
+  const daySelect = elements.trailSheet.querySelector('#sheet-day');
+  if (daySelect && pickedDay && [...daySelect.options].some(option => option.value === pickedDay)) daySelect.value = pickedDay;
+}
+
+function plannedDayIndex(trailId) {
+  return plan ? plan.days.findIndex(day => day.trails.some(trail => trail.id === trailId)) : -1;
+}
+
+// Suggests the day whose destination is closest to the trail (within 30 miles).
+function suggestDay(trail) {
+  if (!plan?.days.length) return 'new';
+  let best = plan.days.length - 1;
+  let bestDistance = Infinity;
+  plan.days.forEach((day, index) => {
+    if (!day.destination) return;
+    const distance = distanceBetween([day.destination.lat, day.destination.lon], trail.center);
+    if (distance < bestDistance) { best = index; bestDistance = distance; }
+  });
+  if (bestDistance < 48000) return best;
+  const openDay = plan.days.findIndex(day => !day.destination);
+  return openDay >= 0 ? openDay : 'new';
+}
+
+function trailPlanMarkup(trail) {
+  const plannedDay = plannedDayIndex(trail.id);
+  if (plannedDay >= 0) {
+    return `<div class="sheet-plan"><p>On <strong>Day ${plannedDay + 1}</strong> of your trip.</p>
+      <div class="sheet-plan-row"><button class="ghost-button" type="button" data-sheet-action="remove">Remove from trip</button><button class="ghost-button" type="button" data-sheet-action="planner">Open planner ↗</button></div></div>`;
+  }
+  const days = plan?.days || [];
+  const suggested = suggestDay(trail);
+  const options = days.map((day, index) => `<option value="${index}"${index === suggested ? ' selected' : ''}>Day ${index + 1}${day.destination ? ` · ${escapeHtml(day.destination.shortName)}` : ''}</option>`).join('')
+    + `<option value="new"${suggested === 'new' ? ' selected' : ''}>${days.length ? 'New day' : 'Day 1'}</option>`;
+  return `<div class="sheet-plan"><label class="field-label" for="sheet-day">ADD TO TRIP</label>
+    <div class="sheet-plan-row"><select id="sheet-day" class="input-field">${options}</select><button class="primary-button" type="button" data-sheet-action="add">Add</button></div>
+    <button class="text-button" type="button" data-sheet-action="planner">Open planner ↗</button></div>`;
+}
+
+// Planned trails keep what the details panel needs, without the full map geometry.
+function planTrail(trail) {
+  const { id, name, length, difficulty, tags, osm, center } = trail;
+  return { id, name, length, difficulty, tags, osm, center, elevation: trailElevation(trail) };
+}
+
+function addTrailToPlan(trail, dayValue) {
+  ensurePlan({ withDay: false });
+  const index = dayValue === 'new' ? plan.days.push(newDay(currentPlace)) - 1 : Number(dayValue);
+  const day = plan.days[index];
+  if (!day) return;
+  if (!day.destination && currentPlace) day.destination = pickPlace(currentPlace);
+  day.trails.push(planTrail(trail));
+  persistPlan();
+  showToast(`Added to Day ${index + 1}.`);
+}
+
+function removeTrailFromPlan(trailId) {
+  if (!plan) return;
+  plan.days.forEach(day => { day.trails = day.trails.filter(trail => trail.id !== trailId); });
+  persistPlan();
+}
+
+function updatePlannedElevation(trailId, elevation) {
+  if (!plan) return;
+  let changed = false;
+  plan.days.forEach(day => day.trails.forEach(trail => {
+    if (trail.id === trailId && !trail.elevation) { trail.elevation = elevation; changed = true; }
+  }));
+  if (changed) persistPlan();
+}
+
+// Trails from a saved plan may not be in the current search results, so mark them by hand.
+function openPlannedTrail(trail) {
+  if (currentItems.some(item => item.id === trail.id)) return focusItem(trail.id);
+  selectedItemId = trail.id;
+  highlightSelection();
+  highlightLayer.clearLayers();
+  L.circleMarker(trail.center, { radius: 10, color: '#d7765a', weight: 3, fillOpacity: 0.25 }).addTo(highlightLayer);
+  map.flyTo(trail.center, 14, { duration: 0.55 });
+  openTrailDetails(trail);
+}
+
+// ─── Trip planner ───────────────────────────────────────────────────
+
+const PLAN_KEY = 'wilderpath:plan-draft';
+// Roads wind, so straight-line distance is scaled up for a rough road estimate.
+const ROAD_FACTOR = 1.3;
+const LONG_DAY_MINUTES = 8 * 60;
+let plan = readPlan();
+let planStatusTimer;
+
+function readPlan() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PLAN_KEY));
+    return Array.isArray(stored?.days) ? stored : null;
+  } catch { return null; }
+}
+
+function newId() {
+  return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function pickPlace(place) {
+  return { name: place.name, shortName: place.shortName, lat: place.lat, lon: place.lon };
+}
+
+function newDay(destination) {
+  return { destination: destination ? pickPlace(destination) : null, trails: [] };
+}
+
+function newPlan({ withDay = true } = {}) {
+  return { id: newId(), name: '', startDate: elements.tripDate.value, days: withDay ? [newDay(currentPlace)] : [] };
+}
+
+function ensurePlan(options) {
+  if (!plan) plan = newPlan(options);
+  return plan;
+}
+
+function setPlan(next) {
+  plan = next;
+  persistPlan();
+}
+
+function persistPlan() {
+  if (plan) localStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+  else localStorage.removeItem(PLAN_KEY);
+  refreshPlanViews();
+}
+
+function refreshPlanViews() {
+  drawPlanStops();
+  const trailCount = plan ? plan.days.reduce((sum, day) => sum + day.trails.length, 0) : 0;
+  elements.planBadge.hidden = !trailCount;
+  elements.planBadge.textContent = trailCount;
+  if (elements.planner.open) renderPlanner();
+  if (sheetTrail) renderTrailSheet();
+}
+
+// The planner is a modal, so the map toast would be hidden behind it.
+function notify(message) {
+  if (!elements.planner.open) return showToast(message);
+  elements.planStatus.textContent = message;
+  clearTimeout(planStatusTimer);
+  planStatusTimer = setTimeout(() => { elements.planStatus.textContent = ''; }, 3000);
+}
+
+function defaultPlanName(target) {
+  const first = target.days.find(day => day.destination)?.destination;
+  return first ? `${first.shortName} trip` : 'My hiking trip';
+}
+
+function dayTotals(day) {
+  return day.trails.reduce((totals, trail) => {
+    if (!(trail.length > 0)) return totals;
+    totals.miles += metersToMiles(trail.length);
+    totals.minutes += hikeMinutes(trail.length, trail.elevation?.climbFt);
+    return totals;
+  }, { miles: 0, minutes: 0 });
+}
+
+function roadMilesBetween(a, b) {
+  return metersToMiles(distanceBetween([a.lat, a.lon], [b.lat, b.lon])) * ROAD_FACTOR;
+}
+
+// Drives between consecutive different destinations, plus to and from home when we know where that is.
+function roadLegs(target) {
+  const legs = [];
+  let previous = userPosition ? { place: { ...userPosition, shortName: 'your location' }, day: -1 } : null;
+  target.days.forEach((day, index) => {
+    const stop = day.destination;
+    if (!stop || (previous && previous.place.lat === stop.lat && previous.place.lon === stop.lon)) return;
+    if (previous) legs.push({ toDay: index, from: previous.place.shortName, miles: roadMilesBetween(previous.place, stop) });
+    previous = { place: stop, day: index };
+  });
+  if (userPosition && previous?.day >= 0) legs.push({ toDay: null, miles: roadMilesBetween(previous.place, userPosition) });
+  return legs;
+}
+
+function planTotals(target) {
+  const totals = target.days.map(dayTotals);
+  return {
+    trails: target.days.reduce((sum, day) => sum + day.trails.length, 0),
+    miles: totals.reduce((sum, day) => sum + day.miles, 0),
+    minutes: totals.reduce((sum, day) => sum + day.minutes, 0),
+    roadMiles: roadLegs(target).reduce((sum, leg) => sum + leg.miles, 0),
+  };
+}
+
+function dayDate(index) {
+  if (!plan.startDate) return '';
+  const date = new Date(`${plan.startDate}T12:00`);
+  date.setDate(date.getDate() + index);
+  return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase();
+}
+
+function trailSummary(trail) {
+  const parts = [DIFFICULTY[trail.difficulty]?.label || 'Not rated'];
+  if (trail.length > 0) parts.unshift(`${metersToMiles(trail.length).toFixed(1)} mi`, `~${formatDuration(hikeMinutes(trail.length, trail.elevation?.climbFt) * 60)}`);
+  return parts.join(' · ');
+}
+
+function dayMarkup(day, index, leg) {
+  const totals = dayTotals(day);
+  const destination = day.destination;
+  const date = dayDate(index);
+  const canUseMap = currentPlace && destination?.name !== currentPlace.name;
+  const trails = day.trails.map((trail, trailIndex) => `
+    <li class="plan-trail">
+      <button class="plan-trail-open" type="button" data-plan-trail="${index}:${trailIndex}"><strong>${escapeHtml(trail.name)}</strong><span>${escapeHtml(trailSummary(trail))}</span></button>
+      <button class="remove-saved" type="button" data-remove-trail="${index}:${trailIndex}" aria-label="Remove ${escapeHtml(trail.name)} from day ${index + 1}">×</button>
+    </li>`).join('');
+  const hiking = totals.minutes ? `${totals.miles.toFixed(1)} mi · ~${formatDuration(totals.minutes * 60)} hiking` : 'No hiking planned yet';
+  return `
+    <li class="plan-day">
+      <div class="plan-day-head">
+        <div><span class="field-label">DAY ${index + 1}${date ? ` · ${date}` : ''}</span><strong>${destination ? escapeHtml(destination.shortName) : 'Pick a destination'}</strong></div>
+        <button class="remove-saved" type="button" data-remove-day="${index}" aria-label="Remove day ${index + 1}"${plan.days.length === 1 ? ' disabled' : ''}>×</button>
+      </div>
+      ${leg ? `<p class="plan-leg">≈ ${Math.round(leg.miles)} road mi from ${escapeHtml(leg.from)}</p>` : ''}
+      <form class="plan-dest-form" data-dest-form="${index}">
+        <input class="input-field" name="q" type="search" placeholder="${destination ? 'Change destination' : 'Search a destination'}" aria-label="Destination for day ${index + 1}" autocomplete="off" />
+        <button class="ghost-button" type="submit">Set</button>
+      </form>
+      ${canUseMap ? `<button class="text-button" type="button" data-use-current="${index}">Use map location · ${escapeHtml(currentPlace.shortName)}</button>` : ''}
+      ${trails ? `<ul class="plan-trails">${trails}</ul>` : '<p class="plan-hint">No trails yet. Click a trail on the map, then “Add”.</p>'}
+      <div class="plan-day-foot">
+        <span>${hiking}</span>
+        ${totals.minutes > LONG_DAY_MINUTES ? '<span class="plan-warn">Long day. Consider splitting it.</span>' : ''}
+        ${destination ? `<button class="text-button" type="button" data-explore-day="${index}">Find trails here ↗</button>` : ''}
+      </div>
+    </li>`;
+}
+
+function renderPlanSummary() {
+  const totals = planTotals(plan);
+  const stat = (value, label) => `<div class="plan-stat"><strong>${value}</strong><span>${label}</span></div>`;
+  const roadNote = userPosition ? 'including to and from your location' : 'use “Go to my location” to include the drive from home';
+  elements.planSummary.innerHTML = `
+    <div class="plan-stats">
+      ${stat(plan.days.length, plan.days.length === 1 ? 'DAY' : 'DAYS')}
+      ${stat(totals.trails, totals.trails === 1 ? 'TRAIL' : 'TRAILS')}
+      ${stat(totals.miles.toFixed(1), 'TRAIL MI')}
+      ${stat((totals.minutes / 60).toFixed(1), 'HIKING HRS')}
+      ${stat(Math.round(totals.roadMiles), 'ROAD MI*')}
+    </div>
+    <p class="plan-note">*Rough estimate: straight-line distance × ${ROAD_FACTOR}, ${roadNote}.${totals.roadMiles > 0 ? ' <button class="text-button" type="button" data-plan-fuel>Use in fuel estimate</button>' : ''}</p>`;
+}
+
+function renderPlanner() {
+  ensurePlan();
+  if (document.activeElement !== elements.planName) elements.planName.value = plan.name;
+  elements.planName.placeholder = defaultPlanName(plan);
+  elements.planStart.value = plan.startDate || '';
+  elements.planStart.min = elements.tripDate.min;
+  renderPlanSummary();
+  const legs = roadLegs(plan);
+  elements.planDays.innerHTML = plan.days.map((day, index) => dayMarkup(day, index, legs.find(leg => leg.toDay === index))).join('')
+    || '<li class="plan-hint">No days yet. Add one to get started.</li>';
+}
+
+function openPlanner() {
+  ensurePlan();
+  persistPlan();
+  renderPlanner();
+  if (!elements.planner.open) elements.planner.showModal();
+}
+
+function drawPlanStops() {
+  planLayer.clearLayers();
+  if (!plan) return;
+  const stops = new Map();
+  const path = [];
+  plan.days.forEach((day, index) => {
+    const stop = day.destination;
+    if (!stop) return;
+    const key = `${stop.lat},${stop.lon}`;
+    if (!stops.has(key)) stops.set(key, { place: stop, days: [] });
+    stops.get(key).days.push(index + 1);
+    const last = path.at(-1);
+    if (!last || last[0] !== stop.lat || last[1] !== stop.lon) path.push([stop.lat, stop.lon]);
+  });
+  if (path.length > 1) L.polyline(path, { color: '#d7765a', weight: 2, opacity: 0.85, dashArray: '2 7', interactive: false }).addTo(planLayer);
+  for (const { place, days } of stops.values()) {
+    const icon = L.divIcon({ className: '', html: `<div class="plan-stop">${days.join(',')}</div>`, iconSize: null });
+    L.marker([place.lat, place.lon], { icon, title: `Day ${days.join(', ')}: ${place.shortName}`, zIndexOffset: 500 })
+      .on('click', openPlanner)
+      .addTo(planLayer);
+  }
+}
+
+function savePlanToLog() {
+  if (!plan.days.some(day => day.destination || day.trails.length)) return notify('Add a destination or trail before saving.');
+  if (!plan.name.trim()) plan.name = defaultPlanName(plan);
+  const trips = readStorage(STORAGE_KEYS.trips);
+  const existing = trips.findIndex(trip => trip.id === plan.id);
+  if (existing >= 0) trips.splice(existing, 1);
+  trips.unshift({ ...structuredClone(plan), savedAt: new Date().toISOString() });
+  saveStorage(STORAGE_KEYS.trips, trips.slice(0, 50));
+  persistPlan();
+  renderSaved();
+  notify(existing >= 0 ? 'Trip log updated.' : 'Saved to your trip log.');
+}
+
+function dayAndTrail(value) {
+  const [dayIndex, trailIndex] = value.split(':').map(Number);
+  return { day: plan.days[dayIndex], trailIndex };
+}
+
+elements.trailSheet.addEventListener('click', event => {
+  const action = event.target.closest('[data-sheet-action]')?.dataset.sheetAction;
+  if (!action || !sheetTrail) return;
+  if (action === 'close') closeTrailDetails();
+  if (action === 'add') addTrailToPlan(sheetTrail, elements.trailSheet.querySelector('#sheet-day').value);
+  if (action === 'remove') removeTrailFromPlan(sheetTrail.id);
+  if (action === 'planner') openPlanner();
+});
+
+elements.planner.addEventListener('click', event => {
+  // Clicks on the dialog element itself, outside its box, are backdrop clicks.
+  if (event.target === elements.planner) {
+    const box = elements.planner.getBoundingClientRect();
+    const inside = event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+    if (!inside) elements.planner.close();
+    return;
+  }
+  const button = event.target.closest('button');
+  if (!button) return;
+  const { removeDay, removeTrail, planTrail: plannedTrail, useCurrent, exploreDay } = button.dataset;
+  if (removeDay !== undefined && plan.days.length > 1) {
+    plan.days.splice(Number(removeDay), 1);
+    persistPlan();
+  } else if (removeTrail !== undefined) {
+    const { day, trailIndex } = dayAndTrail(removeTrail);
+    day?.trails.splice(trailIndex, 1);
+    persistPlan();
+  } else if (plannedTrail !== undefined) {
+    const { day, trailIndex } = dayAndTrail(plannedTrail);
+    const trail = day?.trails[trailIndex];
+    if (!trail) return;
+    elements.planner.close();
+    openPlannedTrail(trail);
+  } else if (useCurrent !== undefined && currentPlace) {
+    plan.days[Number(useCurrent)].destination = pickPlace(currentPlace);
+    persistPlan();
+  } else if (exploreDay !== undefined) {
+    const destination = plan.days[Number(exploreDay)]?.destination;
+    if (!destination) return;
+    elements.planner.close();
+    setPlace(destination);
+  } else if (button.hasAttribute('data-plan-fuel')) {
+    elements.roadMiles.value = Math.round(planTotals(plan).roadMiles);
+    readFuelInputs();
+    notify('Road miles copied to the fuel estimate.');
+  }
+});
+
+elements.planDays.addEventListener('submit', async event => {
+  const form = event.target.closest('[data-dest-form]');
+  if (!form) return;
+  event.preventDefault();
+  const query = form.elements.q.value.trim();
+  if (!query) return;
+  const button = form.querySelector('button');
+  button.disabled = true;
+  button.textContent = '…';
+  try {
+    const place = await geocode(query);
+    if (!place) return notify('No match found. Try a nearby town or landmark.');
+    const day = plan.days[Number(form.dataset.destForm)];
+    if (!day) return;
+    day.destination = pickPlace(place);
+    persistPlan();
+  } catch (error) {
+    console.error('Destination search failed:', error);
+    notify('Location search is unavailable. Please try again.');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Set';
+  }
+});
+
+elements.plannerClose.addEventListener('click', () => elements.planner.close());
+elements.planName.addEventListener('input', () => {
+  plan.name = elements.planName.value;
+  localStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+});
+elements.planName.addEventListener('change', persistPlan);
+elements.planStart.addEventListener('change', () => {
+  plan.startDate = elements.planStart.value;
+  persistPlan();
+});
+elements.planAddDay.addEventListener('click', () => {
+  plan.days.push(newDay(plan.days.at(-1)?.destination || currentPlace));
+  persistPlan();
+  elements.planDays.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
+elements.planNew.addEventListener('click', () => {
+  const hasContent = plan.days.some(day => day.destination || day.trails.length);
+  if (hasContent && !confirm('Clear this plan and start a new one? Trips already saved to your log are kept.')) return;
+  setPlan(newPlan());
+  notify('Started a new plan.');
+});
+elements.planSave.addEventListener('click', savePlanToLog);
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && sheetTrail && !elements.planner.open) closeTrailDetails();
+});
 
 function initializeDate() {
   const today = new Date();
@@ -586,13 +1203,8 @@ elements.resultList.addEventListener('click', event => {
   if (button) focusItem(button.dataset.itemId);
 });
 
-map.on('popupopen', event => {
-  const button = event.popup.getElement()?.querySelector('[data-focus-item]');
-  button?.addEventListener('click', () => focusItem(button.dataset.focusItem));
-});
-
 elements.savePlace.addEventListener('click', toggleFavorite);
-elements.logTrip.addEventListener('click', logTrip);
+elements.planTrip.addEventListener('click', openPlanner);
 
 document.querySelectorAll('.saved-tab').forEach(button => button.addEventListener('click', () => {
   savedTab = button.dataset.tab;
@@ -607,11 +1219,11 @@ document.querySelectorAll('.saved-tab').forEach(button => button.addEventListene
 elements.savedList.addEventListener('click', event => {
   const removeButton = event.target.closest('[data-remove-index]');
   if (removeButton) {
-    const index = Number(removeButton.dataset.removeIndex);
-    const favorites = readStorage(STORAGE_KEYS.favorites);
-    const [removed] = favorites.splice(index, 1);
-    saveStorage(STORAGE_KEYS.favorites, favorites);
-    if (currentPlace?.name === removed?.name) updateSaveButton();
+    const key = savedTab === 'favorites' ? STORAGE_KEYS.favorites : STORAGE_KEYS.trips;
+    const items = readStorage(key);
+    items.splice(Number(removeButton.dataset.removeIndex), 1);
+    saveStorage(key, items);
+    updateSaveButton();
     renderSaved();
     return;
   }
@@ -627,3 +1239,4 @@ elements.hikeHours.addEventListener('change', () => { if (currentPlace) loadWeat
 initializeDate();
 readFuelInputs();
 renderSaved();
+refreshPlanViews();

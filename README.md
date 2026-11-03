@@ -18,7 +18,7 @@ Driving routes use [OpenRouteService](https://openrouteservice.org/). Get a free
 
 ## Data and privacy
 
-Location search uses OpenStreetMap Nominatim, nearby trail and place data uses Overpass API, map tiles are from OpenStreetMap, forecasts use Open-Meteo, and driving routes use OpenRouteService. These services require an internet connection and may rate-limit requests. Favorites and trip logs are saved in this browser's local storage. Location is only accessed when you choose “Use my location.” Live traffic and turn-by-turn directions are not included; verify road conditions and trail access before departure.
+Location search uses OpenStreetMap Nominatim, nearby trail and place data uses Overpass API, map tiles are from OpenStreetMap, forecasts and trail elevation use Open-Meteo, and driving routes use OpenRouteService. These services require an internet connection and may rate-limit requests. Favorites, the trip planner draft, and saved trips are saved in this browser's local storage. Location is only accessed when you choose “Use my location.” Live traffic and turn-by-turn directions are not included; verify road conditions and trail access before departure.
 
 
 https://discord.gg/yueVPwj7j
