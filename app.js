@@ -33,6 +33,7 @@ const elements = {
   tripCount: document.querySelector('#trip-count'),
   savePlace: document.querySelector('#save-place'),
   planTrip: document.querySelector('#plan-trip'),
+  findHotels: document.querySelector('#find-hotels'),
   planBadge: document.querySelector('#plan-badge'),
   trailSheet: document.querySelector('#trail-sheet'),
   planner: document.querySelector('#planner'),
@@ -63,6 +64,8 @@ let userPosition = null;
 let currentItems = [];
 let selectedItemId = null;
 let savedTab = 'favorites';
+const SAVED_PREVIEW_LIMIT = 10;
+let showAllSaved = false;
 let toastTimer;
 
 function readStorage(key) {
@@ -220,9 +223,9 @@ const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'ht
 const OVERPASS_TIMEOUT = 45;
 const OVERPASS_CLIENT_TIMEOUT_MS = (OVERPASS_TIMEOUT + 5) * 1000;
 const TRAIL_SEARCH_RADIUS = 8000;
-// v2 adds trail tags for the details panel; older caches lack them, so drop them.
-const TRAIL_CACHE_KEY = 'wilderpath:trail-cache:v2';
-localStorage.removeItem('wilderpath:trail-cache');
+// v5 adds trailheads, merges trail-number name variants and drops pin-only routes; older caches lack them, so drop them.
+const TRAIL_CACHE_KEY = 'wilderpath:trail-cache:v5';
+for (const oldKey of ['wilderpath:trail-cache', 'wilderpath:trail-cache:v2', 'wilderpath:trail-cache:v3', 'wilderpath:trail-cache:v4']) localStorage.removeItem(oldKey);
 const TRAIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 const TRAIL_CACHE_LIMIT = 25;
 
@@ -251,8 +254,8 @@ function setCachedTrails(key, trails) {
 
 function trailQuery(lat, lon) {
   const area = `around:${TRAIL_SEARCH_RADIUS},${lat},${lon}`;
-  // Paths need full geometry to draw; long-distance routes only need a marker, so they skip it.
-  return `[out:json][timeout:${OVERPASS_TIMEOUT}];way(${area})[highway=path][name];out geom qt 150;relation(${area})[route=hiking];out center qt 30;`;
+  // Paths need full geometry to draw. Hiking routes skip it; they only add details to paths with the same name.
+  return `[out:json][timeout:${OVERPASS_TIMEOUT}];way(${area})[highway=path][name];out geom qt 150;relation(${area})[route=hiking];out center qt 30;node(${area})[highway=trailhead];out qt 200;`;
 }
 
 async function fetchOverpass(query) {
@@ -279,14 +282,28 @@ const roundPoint = ([lat, lon]) => [Number(lat.toFixed(5)), Number(lon.toFixed(5
 // OSM tags shown in the trail details panel.
 const DETAIL_TAGS = ['sac_scale', 'trail_visibility', 'surface', 'dog', 'bicycle', 'horse', 'operator', 'description', 'website', 'wheelchair', 'fee', 'access'];
 
+// "Bear Creek Trail (241)", "Bear Creek Trail #241" and the "Bear Creek Trail" route are one trail.
+function trailNameKey(name) {
+  return name.toLowerCase()
+    .replace(/\(\s*\d+\s*\)|#\s*\d+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s+(trail|trl)$/, '');
+}
+
 // OSM splits long trails into many ways; merge them by name so each trail is listed once.
 function buildTrails(overpassElements) {
   const trails = new Map();
+  const trailheads = [];
   for (const element of overpassElements) {
     const tags = element.tags || {};
+    if (element.type === 'node' && tags.highway === 'trailhead') {
+      trailheads.push(roundPoint([element.lat, element.lon]));
+      continue;
+    }
     const points = getCoords(element).map(roundPoint);
     if (!points.length) continue;
-    const key = tags.name ? `name:${tags.name.toLowerCase()}` : elementId(element);
+    const key = tags.name ? `name:${trailNameKey(tags.name)}` : elementId(element);
     const trail = trails.get(key) || { id: elementId(element), name: itemName(tags), difficulty: '', tags: {}, osm: [], lines: [], point: null };
     trail.difficulty ||= tags.sac_scale || '';
     for (const tag of DETAIL_TAGS) if (tags[tag] && !trail.tags[tag]) trail.tags[tag] = tags[tag];
@@ -295,7 +312,43 @@ function buildTrails(overpassElements) {
     else trail.point ||= points[0];
     trails.set(key, trail);
   }
-  return [...trails.values()];
+  // Hiking routes only come with a center point; keep them only when they matched a mapped path,
+  // otherwise they show up as a pin in an empty spot.
+  const mapped = [...trails.values()].filter(trail => trail.lines.length);
+  for (const trail of mapped) trail.trailhead = nearestTrailhead(trailEnds(trail), trailheads);
+  return mapped;
+}
+
+// A trail is split into several lines; its ends are line ends that no other line of the trail shares.
+function trailEnds(trail) {
+  const ends = trail.lines.flatMap(line => [line[0], line[line.length - 1]]);
+  const count = new Map();
+  for (const point of ends) count.set(point.join(), (count.get(point.join()) || 0) + 1);
+  const open = ends.filter(point => count.get(point.join()) === 1);
+  return open.length ? open : ends;
+}
+
+const TRAILHEAD_MAX_METERS = 400;
+
+function nearestTrailhead(ends, trailheads) {
+  let best = null;
+  let bestDistance = TRAILHEAD_MAX_METERS;
+  for (const end of ends) {
+    for (const trailhead of trailheads) {
+      const distance = distanceBetween(end, trailhead);
+      if (distance < bestDistance) [best, bestDistance] = [trailhead, distance];
+    }
+  }
+  return best;
+}
+
+// Where to send driving directions: a mapped trailhead, else the trail end nearest the searched place.
+function trailStart(trail, place) {
+  if (trail.trailhead) return trail.trailhead;
+  const ends = trail.lines.length ? trailEnds(trail) : [];
+  if (!ends.length) return trail.point;
+  const origin = [place.lat, place.lon];
+  return ends.reduce((best, end) => (distanceBetween(origin, end) < distanceBetween(origin, best) ? end : best));
 }
 
 function trailToItem(trail, place) {
@@ -303,7 +356,7 @@ function trailToItem(trail, place) {
   const center = longest.length ? longest[Math.floor(longest.length / 2)] : trail.point;
   const length = trail.lines.reduce((total, line) => total + lineLength(line), 0);
   const distance = distanceBetween([place.lat, place.lon], center);
-  return { ...trail, center, length, distanceValue: distance, distance: `${formatDistance(distance)} away`, label: 'TRAIL', detail: detailFor(trail.difficulty, length) };
+  return { ...trail, center, start: trailStart(trail, place), length, distanceValue: distance, distance: `${formatDistance(distance)} away`, label: 'TRAIL', detail: detailFor(trail.difficulty, length) };
 }
 
 async function loadNearby(place) {
@@ -399,9 +452,18 @@ async function loadWeather(place) {
     const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
     if (!response.ok) throw new Error(`Forecast returned ${response.status}`);
     const data = await response.json();
+    if (place !== currentPlace) return;
     const date = elements.tripDate.value;
-    let index = data.daily.time.indexOf(date);
-    if (index < 0) index = 0;
+    const index = data.daily.time.indexOf(date);
+    // Forecasts only cover today plus the next 13 days; don't fall back to another day's weather.
+    if (index < 0) {
+      elements.weatherSummary.textContent = 'Weather not available for this date';
+      elements.weatherTemp.textContent = '--°';
+      elements.weatherIcon.textContent = '◌';
+      elements.daylightNote.textContent = 'Forecasts cover the next 14 days. Check back closer to your trip.';
+      renderGear(null);
+      return;
+    }
     const code = data.daily.weather_code[index];
     const high = Math.round(data.daily.temperature_2m_max[index]);
     const low = Math.round(data.daily.temperature_2m_min[index]);
@@ -467,13 +529,28 @@ function shortName(displayName) {
   return displayName.split(',')[0].trim() || displayName;
 }
 
+const TOWN_TYPES = ['city', 'town', 'village', 'hamlet', 'municipality'];
+
+// "Ouray, Colorado" ranks Ouray County above the town of Ouray, and the county's center is miles away.
+// Unless the user asked for a county, prefer a town with the same name inside that county.
+function preferTown(results, query) {
+  const [top] = results;
+  if (top.addresstype !== 'county' || /\bcounty\b/i.test(query)) return top;
+  const countyName = shortName(top.display_name);
+  const baseName = countyName.replace(/\s+county$/i, '').toLowerCase();
+  return results.find(result => TOWN_TYPES.includes(result.addresstype)
+    && shortName(result.display_name).toLowerCase() === baseName
+    && result.display_name.includes(countyName)) || top;
+}
+
 // Returns the best match for a search, or null when nothing matches.
 async function geocode(query) {
-  const params = new URLSearchParams({ q: query, format: 'jsonv2', limit: '1' });
+  const params = new URLSearchParams({ q: query, format: 'jsonv2', limit: '5' });
   const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { headers: { 'Accept-Language': 'en' } });
   if (!response.ok) throw new Error(`Location search returned ${response.status}`);
-  const [result] = await response.json();
-  if (!result) return null;
+  const results = await response.json();
+  if (!results.length) return null;
+  const result = preferTown(results, query);
   return { name: result.display_name, shortName: shortName(result.display_name), lat: Number(result.lat), lon: Number(result.lon) };
 }
 
@@ -506,7 +583,23 @@ function setPlace(place) {
   loadWeather(place);
   loadDriveRoute(place);
   updateSaveButton();
+  updateHotelsLink();
   if (window.innerWidth <= 800) document.querySelector('.map-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Opens Google Hotels for the current place, checking in on the hike date for one night.
+function updateHotelsLink() {
+  if (!currentPlace) return;
+  const params = new URLSearchParams({ q: `hotels near ${currentPlace.name}` });
+  const checkIn = elements.tripDate.value;
+  if (checkIn) {
+    const checkOut = new Date(`${checkIn}T12:00`);
+    checkOut.setDate(checkOut.getDate() + 1);
+    params.set('checkin', checkIn);
+    params.set('checkout', checkOut.toLocaleDateString('en-CA'));
+  }
+  elements.findHotels.href = `https://www.google.com/travel/search?${params}`;
+  elements.findHotels.hidden = false;
 }
 
 function readFuelInputs() {
@@ -561,12 +654,18 @@ function renderSaved() {
     elements.savedList.innerHTML = `<p class="empty-saved">${savedTab === 'favorites' ? 'Your saved places will live here.' : 'Your completed plans will show up here.'}</p>`;
     return;
   }
-  elements.savedList.innerHTML = items.slice(0, 10).map((item, index) => {
+  const visible = showAllSaved ? items : items.slice(0, SAVED_PREVIEW_LIMIT);
+  const rows = visible.map((item, index) => {
     const title = item.days ? item.name : item.shortName;
     const metadata = savedTab === 'favorites' ? 'Favorite destination' : tripLogMeta(item);
     const where = savedTab === 'favorites' ? 'favorites' : 'trip log';
     return `<div class="saved-item"><button class="saved-item-open" type="button" data-saved-index="${index}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(metadata)}</span></button><button class="remove-saved" type="button" data-remove-index="${index}" aria-label="Remove ${escapeHtml(title)} from ${where}">×</button></div>`;
-  }).join('');
+  });
+  if (items.length > SAVED_PREVIEW_LIMIT) {
+    const label = showAllSaved ? 'Show less' : `Show all ${items.length}`;
+    rows.push(`<button class="show-more-saved" type="button" data-toggle-saved>${label}</button>`);
+  }
+  elements.savedList.innerHTML = rows.join('');
 }
 
 function selectSavedItem(index) {
@@ -698,7 +797,7 @@ function renderTrailSheet() {
     ['Access', tags.access && tagText(tags.access)],
     ['Managed by', tags.operator],
   ].filter(fact => fact && fact[1]);
-  const [lat, lon] = trail.center;
+  const [lat, lon] = trail.start || trail.center;
   const links = [`<a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank" rel="noopener">Directions ↗</a>`];
   if (trail.osm?.[0]) links.push(`<a href="https://www.openstreetmap.org/${escapeHtml(trail.osm[0])}" target="_blank" rel="noopener">OpenStreetMap ↗</a>`);
   const website = tags.website && safeUrl(tags.website);
@@ -1208,6 +1307,7 @@ elements.planTrip.addEventListener('click', openPlanner);
 
 document.querySelectorAll('.saved-tab').forEach(button => button.addEventListener('click', () => {
   savedTab = button.dataset.tab;
+  showAllSaved = false;
   document.querySelectorAll('.saved-tab').forEach(tab => {
     const active = tab === button;
     tab.classList.toggle('active', active);
@@ -1217,6 +1317,11 @@ document.querySelectorAll('.saved-tab').forEach(button => button.addEventListene
 }));
 
 elements.savedList.addEventListener('click', event => {
+  if (event.target.closest('[data-toggle-saved]')) {
+    showAllSaved = !showAllSaved;
+    renderSaved();
+    return;
+  }
   const removeButton = event.target.closest('[data-remove-index]');
   if (removeButton) {
     const key = savedTab === 'favorites' ? STORAGE_KEYS.favorites : STORAGE_KEYS.trips;
@@ -1232,7 +1337,7 @@ elements.savedList.addEventListener('click', event => {
 });
 
 [elements.roadMiles, elements.mpg, elements.fuelPrice].forEach(input => input.addEventListener('input', readFuelInputs));
-elements.tripDate.addEventListener('change', () => { if (currentPlace) loadWeather(currentPlace); });
+elements.tripDate.addEventListener('change', () => { if (currentPlace) { loadWeather(currentPlace); updateHotelsLink(); } });
 elements.startTime.addEventListener('change', () => { if (currentPlace) loadWeather(currentPlace); });
 elements.hikeHours.addEventListener('change', () => { if (currentPlace) loadWeather(currentPlace); });
 

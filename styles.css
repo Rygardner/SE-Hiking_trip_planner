@@ -239,3 +239,7 @@ h1 em { color: var(--green); font-weight: 500; }
   .planner-foot { flex-wrap: wrap; }
 }
 @media (max-width: 380px) { .sidebar { padding-right: 15px; padding-left: 15px; }.map-location { padding: 9px; font-size: 8px; }.map-action { height: 34px; min-width: 34px; padding: 0 8px; }.log-action { font-size: 8px; }.map-legend { gap: 8px; font-size: 7px; } }
+.show-more-saved { display: block; width: 100%; margin: 6px 0 2px; padding: 6px 0; border: 0; background: none; color: var(--coral); font-family: var(--mono); font-size: 9px; letter-spacing: .45px; text-align: left; cursor: pointer; }
+.show-more-saved:hover { text-decoration: underline; }
+.hotels-action { display: inline-flex; align-items: center; font-family: var(--mono); font-size: 9px; letter-spacing: .45px; text-decoration: none; }
+.hotels-action[hidden] { display: none; }
