@@ -1,4 +1,4 @@
-# Wilderpath Hiking Trip Planner
+# My Trailside Hiking Trip Planner
 
 A browser-based hiking planner for discovering trails, checking trip-day weather, finding nearby stays and recreation, estimating fuel cost, and saving destinations and trip plans.
 
