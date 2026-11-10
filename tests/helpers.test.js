@@ -101,7 +101,7 @@ describe('helper functions', () => {
     const query = fn('trailQuery')('39.76', '-105.22');
     assert.match(query, /\[timeout:45\]/);
     assert.match(query, /around:8000,39\.76,-105\.22/);
-    assert.match(query, /highway=trailhead/);
+    assert.match(query, /nwr\(around:8000,39\.76,-105\.22\)\[highway=trailhead\];out center/);
   });
 
   it('calculates the fuel cost', () => {

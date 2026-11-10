@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { loadApp, reply, plain } = require('./helpers/app-harness');
 const { GOLDEN, overpassData } = require('./helpers/fixtures');
 
-const CACHE_KEY = 'wilderpath:trail-cache:v5';
+const CACHE_KEY = 'wilderpath:trail-cache:v6';
 
 describe('buildTrails', () => {
   let app;
@@ -47,6 +47,34 @@ describe('buildTrails', () => {
     assert.deepEqual(plain(start(mesa, GOLDEN)), [39.8, -105.3]);
   });
 
+  it('uses trailheads mapped as areas', () => {
+    const elements = [
+      { type: 'way', id: 1, tags: { name: 'Ridge Trail' }, geometry: [{ lat: 40, lon: -105 }, { lat: 40.01, lon: -105 }] },
+      { type: 'way', id: 2, tags: { highway: 'trailhead', amenity: 'parking' }, center: { lat: 40.0101, lon: -105.0001 } },
+    ];
+    const [trail] = plain(app.run('buildTrails')(elements));
+    assert.deepEqual(trail.trailhead, [40.0101, -105.0001]);
+  });
+
+  it('does not treat a spur junction in the middle of the trail as its start', () => {
+    // Main line runs south to north; a spur of the same trail leaves from its middle point.
+    const elements = [
+      { type: 'way', id: 1, tags: { name: 'Spur Trail' }, geometry: [{ lat: 40, lon: -105 }, { lat: 40.01, lon: -105 }, { lat: 40.02, lon: -105 }] },
+      { type: 'way', id: 2, tags: { name: 'Spur Trail' }, geometry: [{ lat: 40.01, lon: -105 }, { lat: 40.01, lon: -105.01 }] },
+    ];
+    const [trail] = plain(app.run('buildTrails')(elements));
+    const ends = plain(app.run('trailEnds')(trail));
+    assert.deepEqual(ends, [[40, -105], [40.02, -105], [40.01, -105.01]]);
+    // Searching right at the junction used to send directions there.
+    const start = plain(app.run('trailStart')(trail, { lat: 40.01, lon: -105 }));
+    assert.notDeepEqual(start, [40.01, -105]);
+  });
+
+  it('treats every line end of a loop as a possible start', () => {
+    const loop = { lines: [[[40, -105], [40.01, -105], [40.01, -105.01], [40, -105]]] };
+    assert.deepEqual(plain(app.run('trailEnds')(loop)), [[40, -105], [40, -105]]);
+  });
+
   it('ignores elements with no coordinates', () => {
     assert.deepEqual(plain(app.run('buildTrails')([{ type: 'way', id: 9, tags: { name: 'Ghost' } }])), []);
   });
@@ -86,7 +114,8 @@ describe('trail cache', () => {
   });
 
   it('clears caches from older app versions on load', () => {
-    app = loadApp({ storage: { 'wilderpath:trail-cache:v4': {}, 'wilderpath:trail-cache': {} } });
+    app = loadApp({ storage: { 'wilderpath:trail-cache:v5': {}, 'wilderpath:trail-cache:v4': {}, 'wilderpath:trail-cache': {} } });
+    assert.equal(app.window.localStorage.getItem('wilderpath:trail-cache:v5'), null);
     assert.equal(app.window.localStorage.getItem('wilderpath:trail-cache:v4'), null);
     assert.equal(app.window.localStorage.getItem('wilderpath:trail-cache'), null);
   });

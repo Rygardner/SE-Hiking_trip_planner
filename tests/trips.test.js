@@ -154,6 +154,17 @@ describe('trip planner', () => {
     assert.match(app.$('#trail-sheet').textContent, /On Day 1 of your trip/);
   });
 
+  it('sends directions to the trail start when opened from the planner', () => {
+    click(app, '.result-card');
+    click(app, '[data-sheet-action="add"]');
+    assert.deepEqual(app.storage(PLAN_KEY).days[0].trails[0].start, [39.7601, -105.2301]);
+    click(app, '[data-sheet-action="close"]');
+    click(app, '#plan-trip');
+    click(app, '[data-plan-trail="0:0"]');
+    const directions = app.$$('.sheet-links a').find(link => link.textContent.startsWith('Directions'));
+    assert.equal(directions.href, 'https://www.google.com/maps/dir/?api=1&destination=39.7601,-105.2301');
+  });
+
   it('removes a trail from the trip', () => {
     click(app, '.result-card');
     click(app, '[data-sheet-action="add"]');

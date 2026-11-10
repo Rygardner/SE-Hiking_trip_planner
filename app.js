@@ -232,9 +232,9 @@ const OVERPASS_CLIENT_TIMEOUT_MS = (OVERPASS_TIMEOUT + 5) * 1000;
 const OVERPASS_RETRIES = 1;
 const OVERPASS_RETRY_DELAY_MS = 5000;
 const TRAIL_SEARCH_RADIUS = 8000;
-// v5 adds trailheads, merges trail-number name variants and drops pin-only routes; older caches lack them, so drop them.
-const TRAIL_CACHE_KEY = 'wilderpath:trail-cache:v5';
-for (const oldKey of ['wilderpath:trail-cache', 'wilderpath:trail-cache:v2', 'wilderpath:trail-cache:v3', 'wilderpath:trail-cache:v4']) localStorage.removeItem(oldKey);
+// v6 adds trailheads mapped as areas (e.g. a parking lot), not just points; older caches lack them, so drop them.
+const TRAIL_CACHE_KEY = 'wilderpath:trail-cache:v6';
+for (const oldKey of ['wilderpath:trail-cache', 'wilderpath:trail-cache:v2', 'wilderpath:trail-cache:v3', 'wilderpath:trail-cache:v4', 'wilderpath:trail-cache:v5']) localStorage.removeItem(oldKey);
 const TRAIL_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 const TRAIL_CACHE_LIMIT = 25;
 
@@ -264,7 +264,7 @@ function setCachedTrails(key, trails) {
 function trailQuery(lat, lon) {
   const area = `around:${TRAIL_SEARCH_RADIUS},${lat},${lon}`;
   // Paths need full geometry to draw. Hiking routes skip it; they only add details to paths with the same name.
-  return `[out:json][timeout:${OVERPASS_TIMEOUT}];way(${area})[highway=path][name];out geom qt 150;relation(${area})[route=hiking];out center qt 30;node(${area})[highway=trailhead];out qt 200;`;
+  return `[out:json][timeout:${OVERPASS_TIMEOUT}];way(${area})[highway=path][name];out geom qt 150;relation(${area})[route=hiking];out center qt 30;nwr(${area})[highway=trailhead];out center qt 200;`;
 }
 
 // TEMP timing: sends a line to tests/timing_server.py (written to tests/trail_api_timing.txt). Remove when done.
@@ -337,8 +337,10 @@ function buildTrails(overpassElements) {
   const trailheads = [];
   for (const element of overpassElements) {
     const tags = element.tags || {};
-    if (element.type === 'node' && tags.highway === 'trailhead') {
-      trailheads.push(roundPoint([element.lat, element.lon]));
+    // Trailheads can be mapped as a point or as an area (sent as its center).
+    if (tags.highway === 'trailhead') {
+      const [point] = getCoords(element);
+      if (point) trailheads.push(roundPoint(point));
       continue;
     }
     const points = getCoords(element).map(roundPoint);
@@ -359,13 +361,20 @@ function buildTrails(overpassElements) {
   return mapped;
 }
 
-// A trail is split into several lines; its ends are line ends that no other line of the trail shares.
+// A trail is split into several lines; its ends are line ends that touch no other line of the trail.
+// Checking every point, not just other line ends, keeps a spur that branches off mid-line from
+// turning the junction into a fake "end" in the middle of the trail.
 function trailEnds(trail) {
-  const ends = trail.lines.flatMap(line => [line[0], line[line.length - 1]]);
-  const count = new Map();
-  for (const point of ends) count.set(point.join(), (count.get(point.join()) || 0) + 1);
-  const open = ends.filter(point => count.get(point.join()) === 1);
-  return open.length ? open : ends;
+  const linesAt = new Map(); // point → how many lines pass through it
+  for (const line of trail.lines) {
+    for (const key of new Set(line.map(point => point.join()))) linesAt.set(key, (linesAt.get(key) || 0) + 1);
+  }
+  const open = trail.lines
+    .filter(line => line[0].join() !== line[line.length - 1].join()) // a closed loop has no end
+    .flatMap(line => [line[0], line[line.length - 1]])
+    .filter(point => linesAt.get(point.join()) === 1);
+  // Loops have no real end; fall back to every line end so a nearby trailhead or point can still be picked.
+  return open.length ? open : trail.lines.flatMap(line => [line[0], line[line.length - 1]]);
 }
 
 const TRAILHEAD_MAX_METERS = 400;
@@ -917,8 +926,8 @@ function trailPlanMarkup(trail) {
 
 // Planned trails keep what the details panel needs, without the full map geometry.
 function planTrail(trail) {
-  const { id, name, length, difficulty, tags, osm, center } = trail;
-  return { id, name, length, difficulty, tags, osm, center, elevation: trailElevation(trail) };
+  const { id, name, length, difficulty, tags, osm, center, start } = trail;
+  return { id, name, length, difficulty, tags, osm, center, start, elevation: trailElevation(trail) };
 }
 
 function addTrailToPlan(trail, dayValue) {
