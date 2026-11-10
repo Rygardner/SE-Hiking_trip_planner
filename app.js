@@ -433,10 +433,13 @@ async function loadNearby(place) {
   } catch (error) {
     logTrailTiming(`=== LOAD FAILED total ${(performance.now() - loadStart).toFixed(0)} ms: ${error.message}`); // TEMP timing
     console.error('Trail search failed:', error);
+    // A newer search has taken over the list; don't cover it with this old search's error.
+    if (place !== currentPlace) return;
     elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">!</span><p>Trail data could not load right now. Check your connection and try again.</p></div>';
     elements.resultCount.textContent = 'MAP DATA OFFLINE';
   } finally {
-    elements.sidebar.classList.remove('loading');
+    // Only the latest search may turn off the loading indicator.
+    if (place === currentPlace) elements.sidebar.classList.remove('loading');
   }
 }
 
@@ -611,13 +614,14 @@ async function searchLocation(query) {
     const place = await geocode(query);
     if (!place) {
       showToast('No match found. Try a nearby town or landmark.');
+      elements.sidebar.classList.remove('loading');
       return;
     }
+    // loadNearby (via setPlace) now owns the loading indicator and clears it when trails finish.
     setPlace(place);
   } catch (error) {
     console.error('Location search failed:', error);
     showToast('Location search is unavailable. Please try again.');
-  } finally {
     elements.sidebar.classList.remove('loading');
   }
 }

@@ -101,3 +101,35 @@
 [2026-11-10T08:15:59] BUILD+CACHE     42 trails in 34 ms
 [2026-11-10T08:15:59] RENDER          36 ms
 [2026-11-10T08:15:59] === LOAD DONE   total 187191 ms
+[2026-11-10T08:22:20] === LOAD START  "Steamboat Springs" key=40.48,-106.83
+[2026-11-10T08:22:20] API CALL START  https://overpass.kumi.systems/api/interpreter
+[2026-11-10T08:22:23] API FAILED      https://overpass.kumi.systems/api/interpreter after 2647 ms: TypeError: NetworkError when attempting to fetch resource.
+[2026-11-10T08:22:23] API CALL START  https://overpass-api.de/api/interpreter
+[2026-11-10T08:22:23] API FAILED      https://overpass-api.de/api/interpreter after 46705 ms: TypeError: NetworkError when attempting to fetch resource.
+[2026-11-10T08:22:23] RETRY 1/1       all endpoints failed, waiting 5000 ms
+[2026-11-10T08:22:43] === LOAD START  "White River National Forest" key=39.45,-106.50
+[2026-11-10T08:22:43] API CALL START  https://overpass.kumi.systems/api/interpreter
+[2026-11-10T08:22:46] === LOAD START  "Steamboat Springs" key=40.48,-106.83
+[2026-11-10T08:22:46] API CALL START  https://overpass.kumi.systems/api/interpreter
+[2026-11-10T08:23:34] API CALL START  https://overpass-api.de/api/interpreter
+[2026-11-10T08:23:34] API FAILED      https://overpass.kumi.systems/api/interpreter after 50002 ms: TimeoutError: The operation timed out.
+[2026-11-10T08:23:34] API RESPONSE    https://overpass-api.de/api/interpreter status=502 after 252 ms
+[2026-11-10T08:23:35] API FAILED      https://overpass-api.de/api/interpreter after 252 ms: Error: Trail search returned 502
+[2026-11-10T08:23:35] RETRY 1/1       all endpoints failed, waiting 5000 ms
+[2026-11-10T08:23:37] API FAILED      https://overpass.kumi.systems/api/interpreter after 50001 ms: TimeoutError: The operation timed out.
+[2026-11-10T08:23:37] API CALL START  https://overpass-api.de/api/interpreter
+[2026-11-10T08:23:37] API CALL START  https://overpass.kumi.systems/api/interpreter
+[2026-11-10T08:24:14] API RESPONSE    https://overpass-api.de/api/interpreter status=200 after 39260 ms
+[2026-11-10T08:24:15] API DONE        https://overpass-api.de/api/interpreter 151 elements, total 39680 ms
+[2026-11-10T08:24:15] BUILD+CACHE     57 trails in 79 ms
+[2026-11-10T08:24:15] RENDER          69 ms
+[2026-11-10T08:24:15] === LOAD DONE   total 89839 ms
+[2026-11-10T08:24:29] API FAILED      https://overpass.kumi.systems/api/interpreter after 50001 ms: TimeoutError: The operation timed out.
+[2026-11-10T08:24:29] API CALL START  https://overpass-api.de/api/interpreter
+[2026-11-10T08:25:07] API RESPONSE    https://overpass-api.de/api/interpreter status=200 after 37769 ms
+[2026-11-10T08:25:07] API DONE        https://overpass-api.de/api/interpreter 18 elements, total 37979 ms
+[2026-11-10T08:25:07] BUILD+CACHE     10 trails in 68 ms
+[2026-11-10T08:27:06] === LOAD START  "White River National Forest" key=39.45,-106.50
+[2026-11-10T08:27:06] CACHE HIT       no API call made, 10 trails
+[2026-11-10T08:27:06] RENDER          15 ms
+[2026-11-10T08:27:06] === LOAD DONE   total 40 ms
