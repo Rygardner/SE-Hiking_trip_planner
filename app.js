@@ -176,6 +176,12 @@ function renderResults() {
     </button>`).join('');
 }
 
+// Shown in the trails list while the trail search API calls are still running.
+function renderLoading() {
+  elements.resultCount.textContent = 'SEARCHING…';
+  elements.resultList.innerHTML = '<div class="empty-results loading-results" role="status"><span class="spinner" aria-hidden="true"></span><p>Looking for trails nearby…<br />This can take a little while.</p></div>';
+}
+
 function drawItems(items) {
   layers.clearLayers();
   for (const item of items.slice(0, 100)) {
@@ -222,6 +228,9 @@ const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'ht
 // The server gets OVERPASS_TIMEOUT seconds; the browser waits a bit longer, then tries the next endpoint.
 const OVERPASS_TIMEOUT = 45;
 const OVERPASS_CLIENT_TIMEOUT_MS = (OVERPASS_TIMEOUT + 5) * 1000;
+// If every endpoint fails, wait and try them all again (Overpass 502s are often brief overloads).
+const OVERPASS_RETRIES = 1;
+const OVERPASS_RETRY_DELAY_MS = 5000;
 const TRAIL_SEARCH_RADIUS = 8000;
 // v5 adds trailheads, merges trail-number name variants and drops pin-only routes; older caches lack them, so drop them.
 const TRAIL_CACHE_KEY = 'wilderpath:trail-cache:v5';
@@ -258,9 +267,36 @@ function trailQuery(lat, lon) {
   return `[out:json][timeout:${OVERPASS_TIMEOUT}];way(${area})[highway=path][name];out geom qt 150;relation(${area})[route=hiking];out center qt 30;node(${area})[highway=trailhead];out qt 200;`;
 }
 
+// TEMP timing: sends a line to tests/timing_server.py (written to tests/trail_api_timing.txt). Remove when done.
+function logTrailTiming(message) {
+  console.log(`[trail-timing] ${message}`);
+  fetch('/__trail-timing', { method: 'POST', body: message }).catch(() => {});
+}
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function fetchOverpass(query) {
   let lastError;
+  for (let attempt = 0; attempt <= OVERPASS_RETRIES; attempt++) {
+    if (attempt > 0) {
+      logTrailTiming(`RETRY ${attempt}/${OVERPASS_RETRIES}       all endpoints failed, waiting ${OVERPASS_RETRY_DELAY_MS} ms`); // TEMP timing
+      await wait(OVERPASS_RETRY_DELAY_MS);
+    }
+    try {
+      return await fetchOverpassOnce(query);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+// Tries each endpoint in order and returns the first successful response.
+async function fetchOverpassOnce(query) {
+  let lastError;
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    const attemptStart = performance.now(); // TEMP timing
+    logTrailTiming(`API CALL START  ${endpoint}`); // TEMP timing
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -268,9 +304,13 @@ async function fetchOverpass(query) {
         body: `data=${encodeURIComponent(query)}`,
         signal: AbortSignal.timeout(OVERPASS_CLIENT_TIMEOUT_MS),
       });
+      logTrailTiming(`API RESPONSE    ${endpoint} status=${response.status} after ${(performance.now() - attemptStart).toFixed(0)} ms`); // TEMP timing
       if (!response.ok) throw new Error(`Trail search returned ${response.status}`);
-      return await response.json();
+      const json = await response.json();
+      logTrailTiming(`API DONE        ${endpoint} ${json.elements?.length ?? 0} elements, total ${(performance.now() - attemptStart).toFixed(0)} ms`); // TEMP timing
+      return json;
     } catch (error) {
+      logTrailTiming(`API FAILED      ${endpoint} after ${(performance.now() - attemptStart).toFixed(0)} ms: ${error.name}: ${error.message}`); // TEMP timing
       lastError = error;
     }
   }
@@ -367,21 +407,31 @@ async function loadNearby(place) {
   layers.clearLayers();
   highlightLayer.clearLayers();
   closeTrailDetails();
-  renderResults();
+  renderLoading();
   const cacheKey = trailCacheKey(place);
+  const loadStart = performance.now(); // TEMP timing
+  logTrailTiming(`=== LOAD START  "${place.shortName}" key=${cacheKey}`); // TEMP timing
   try {
     let trails = getCachedTrails(cacheKey);
     if (!trails) {
       const [lat, lon] = cacheKey.split(',');
       const data = await fetchOverpass(trailQuery(lat, lon));
+      const buildStart = performance.now(); // TEMP timing
       trails = buildTrails(data.elements || []);
       setCachedTrails(cacheKey, trails);
+      logTrailTiming(`BUILD+CACHE     ${trails.length} trails in ${(performance.now() - buildStart).toFixed(0)} ms`); // TEMP timing
+    } else {
+      logTrailTiming(`CACHE HIT       no API call made, ${trails.length} trails`); // TEMP timing
     }
     if (place !== currentPlace) return;
+    const renderStart = performance.now(); // TEMP timing
     currentItems = trails.map(trail => trailToItem(trail, place)).sort((a, b) => a.distanceValue - b.distanceValue);
     drawItems(currentItems);
     renderResults();
+    logTrailTiming(`RENDER          ${(performance.now() - renderStart).toFixed(0)} ms`); // TEMP timing
+    logTrailTiming(`=== LOAD DONE   total ${(performance.now() - loadStart).toFixed(0)} ms`); // TEMP timing
   } catch (error) {
+    logTrailTiming(`=== LOAD FAILED total ${(performance.now() - loadStart).toFixed(0)} ms: ${error.message}`); // TEMP timing
     console.error('Trail search failed:', error);
     elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">!</span><p>Trail data could not load right now. Check your connection and try again.</p></div>';
     elements.resultCount.textContent = 'MAP DATA OFFLINE';
