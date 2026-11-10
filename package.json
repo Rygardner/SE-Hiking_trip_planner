@@ -1,0 +1,11 @@
+{
+  "name": "my-trailside",
+  "private": true,
+  "description": "Hiking trip planner",
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.3"
+  }
+}
