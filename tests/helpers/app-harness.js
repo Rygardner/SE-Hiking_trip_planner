@@ -16,7 +16,6 @@ const ROUTES = {
   geocode: /nominatim\.openstreetmap\.org/,
   forecast: /open-meteo\.com\/v1\/forecast/,
   elevation: /open-meteo\.com\/v1\/elevation/,
-  route: /openrouteservice\.org/,
 };
 
 // Minimal stand-in for the parts of Leaflet that app.js uses.
@@ -71,7 +70,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function loadApp({ storage = {}, config = { orsApiKey: '' }, routes = {} } = {}) {
+function loadApp({ storage = {}, routes = {} } = {}) {
   const errors = [];
   const virtualConsole = new VirtualConsole();
   // Uncaught errors in app code (e.g. inside event handlers) show up here.
@@ -92,7 +91,6 @@ function loadApp({ storage = {}, config = { orsApiKey: '' }, routes = {} } = {})
   window.setTimeout = (fn, _ms, ...args) => realSetTimeout(fn, 0, ...args);
 
   window.L = createFakeLeaflet();
-  window.WILDERPATH_CONFIG = config;
 
   const handlers = { ...routes };
   const fetchCalls = [];

@@ -51,12 +51,10 @@ const elements = {
   mpg: document.querySelector('#mpg'),
   fuelPrice: document.querySelector('#fuel-price'),
   fuelTotal: document.querySelector('#fuel-total'),
-  routeNote: document.querySelector('#route-note'),
   sidebar: document.querySelector('.sidebar'),
 };
 
 const layers = L.layerGroup().addTo(map);
-const routeLayer = L.layerGroup().addTo(map);
 const planLayer = L.layerGroup().addTo(map);
 const highlightLayer = L.layerGroup().addTo(map);
 let currentPlace = null;
@@ -452,51 +450,11 @@ async function loadNearby(place) {
   }
 }
 
-const ORS_API_KEY = window.WILDERPATH_CONFIG?.orsApiKey || '';
-
 function formatDuration(seconds) {
   const totalMinutes = Math.max(1, Math.round(seconds / 60));
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return hours ? `${hours} hr ${minutes} min` : `${minutes} min`;
-}
-
-// Draws the drive from the user's GPS position to the destination and fills in road miles.
-async function loadDriveRoute(place) {
-  routeLayer.clearLayers();
-  if (!ORS_API_KEY) {
-    elements.routeNote.textContent = 'Add an OpenRouteService key in config.js to see the driving route.';
-    return;
-  }
-  if (!userPosition) {
-    elements.routeNote.textContent = 'Use “Go to my location” to get a driving route here.';
-    return;
-  }
-  elements.routeNote.textContent = 'Finding a driving route…';
-  try {
-    const params = new URLSearchParams({
-      api_key: ORS_API_KEY,
-      start: `${userPosition.lon},${userPosition.lat}`,
-      end: `${place.lon},${place.lat}`,
-    });
-    const response = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car?${params}`);
-    if (!response.ok) throw new Error(`Route returned ${response.status}`);
-    const data = await response.json();
-    if (place !== currentPlace) return;
-    const feature = data.features?.[0];
-    if (!feature) throw new Error('No route found');
-    const points = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-    L.polyline(points, { color: '#3d5a80', weight: 4, opacity: 0.75, dashArray: '6 6' }).addTo(routeLayer);
-    const { distance, duration } = feature.properties.summary;
-    const oneWayMiles = distance / 1609.344;
-    elements.roadMiles.value = Math.round(oneWayMiles * 2);
-    readFuelInputs();
-    elements.routeNote.textContent = `Drive ${formatDuration(duration)} · ${formatDistance(distance)} each way. Road miles set to the round trip.`;
-  } catch (error) {
-    if (place !== currentPlace) return;
-    console.error('Driving route failed:', error);
-    elements.routeNote.textContent = 'Driving route unavailable. Enter road miles by hand.';
-  }
 }
 
 async function loadWeather(place) {
@@ -644,7 +602,6 @@ function setPlace(place) {
   map.flyTo([place.lat, place.lon], 12, { duration: 0.6 });
   loadNearby(place);
   loadWeather(place);
-  loadDriveRoute(place);
   updateSaveButton();
   updateHotelsLink();
   if (window.innerWidth <= 800) document.querySelector('.map-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1328,7 +1285,6 @@ elements.nearMe.addEventListener('click', () => {
     position => {
       const { latitude, longitude } = position.coords;
       userPosition = { lat: latitude, lon: longitude };
-      if (currentPlace) loadDriveRoute(currentPlace);
 
       // Center the map on the user's GPS position.
       map.flyTo([latitude, longitude], 12, {

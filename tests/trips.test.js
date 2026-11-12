@@ -245,6 +245,6 @@ describe('trip planner', () => {
     app.close();
     app = loadApp({ storage: { [PLAN_KEY]: draft } });
     assert.equal(app.$('#plan-badge').textContent, '1');
-    assert.equal(app.L.groups[2].layers.length, 1, 'day stop drawn on the map');
+    assert.equal(app.L.groups[1].layers.length, 1, 'day stop drawn on the map');
   });
 });
