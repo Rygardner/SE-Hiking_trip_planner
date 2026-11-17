@@ -1,6 +1,5 @@
 Requirements for Hiking Trip Planner:
 
-Traffic
 Route path
 Location lookup
 look at hike trails

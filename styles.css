@@ -112,8 +112,6 @@ h1 em { color: var(--green); font-weight: 500; }
 .result-type { color: var(--coral); font-family: var(--mono); font-size: 7px; white-space: nowrap; }
 .result-meta { margin-top: 6px; color: #849082; font-size: 9px; }
 .result-meta b { padding: 0 3px; color: #bcc3b6; font-weight: 400; }
-.traffic-note { margin: 11px 0 0; padding-top: 8px; display: flex; align-items: center; gap: 5px; border-top: 1px solid #e1e3da; color: #899286; font-size: 9px; }
-.traffic-note span { color: #c39b47; }
 .map-credit { position: absolute; z-index: 500; right: 18px; bottom: 228px; padding: 4px 6px; background: #f7f6f0d9; color: #7c8779; font-size: 7px; }
 .toast { position: absolute; z-index: 1000; top: 74px; left: 50%; max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 2px; background: var(--ink); color: white; font-size: 11px; opacity: 0; pointer-events: none; transform: translate(-50%, -7px); transition: opacity .2s, transform .2s; }
 .toast.visible { opacity: 1; transform: translate(-50%, 0); }
