@@ -83,6 +83,7 @@
           <div class="saved-tabs" role="tablist" aria-label="Saved plans">
             <button class="saved-tab active" type="button" role="tab" aria-selected="true" data-tab="favorites">FAVORITES <span id="favorite-count">0</span></button>
             <button class="saved-tab" type="button" role="tab" aria-selected="false" data-tab="trips">TRIP LOG <span id="trip-count">0</span></button>
+            <button class="saved-tab" type="button" role="tab" aria-selected="false" data-tab="completed">COMPLETED <span id="completed-count">0</span></button>
           </div>
           <div id="saved-list" class="saved-list"><p class="empty-saved">Your saved places will live here.</p></div>
         </section>
@@ -97,7 +98,7 @@
           <div class="map-actions"><button id="save-place" class="map-action" type="button" title="Save this destination" aria-label="Save this destination">☆</button><a id="find-hotels" class="map-action hotels-action" href="#" target="_blank" rel="noopener" title="Find hotels near this destination" hidden>HOTELS ↗</a><button id="plan-trip" class="map-action log-action" type="button" title="Open the trip planner"><span aria-hidden="true">＋</span> PLAN TRIP<span class="plan-badge" id="plan-badge" hidden>0</span></button></div>
         </div>
         <aside class="trail-sheet" id="trail-sheet" role="dialog" aria-labelledby="trail-sheet-title" hidden></aside>
-        <div class="map-legend"><span><i class="legend-dot trail-dot"></i>HIKING TRAILS</span></div>
+        <div class="map-legend"><span><i class="legend-dot trail-dot"></i>HIKING TRAILS</span><span><i class="legend-dot done-dot"></i>COMPLETED</span></div>
         <div class="results-dock">
           <div class="dock-head"><div><p class="eyebrow">OUT THERE, NEARBY</p><h2 id="results-title">A good place to start</h2></div><span class="result-count" id="result-count">0 TRAILS</span></div>
           <div class="result-list" id="result-list"><div class="empty-results"><span class="empty-sun">✳</span><p>Search a destination to find<br />hiking trails nearby.</p></div></div>
