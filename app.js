@@ -1,6 +1,6 @@
 
 const DEFAULT_CENTER = [39.7392, -104.9903];
-const STORAGE_KEYS = { favorites: 'wilderpath:favorites', trips: 'wilderpath:trips' };
+const STORAGE_KEYS = { favorites: 'wilderpath:favorites', trips: 'wilderpath:trips', completed: 'wilderpath:completed' };
 
 const map = L.map('map', { zoomControl: false }).setView(DEFAULT_CENTER, 8);
 
@@ -31,6 +31,7 @@ const elements = {
   savedList: document.querySelector('#saved-list'),
   favoriteCount: document.querySelector('#favorite-count'),
   tripCount: document.querySelector('#trip-count'),
+  completedCount: document.querySelector('#completed-count'),
   savePlace: document.querySelector('#save-place'),
   planTrip: document.querySelector('#plan-trip'),
   findHotels: document.querySelector('#find-hotels'),
@@ -122,10 +123,51 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
 
-function markerIcon(selected = false) {
+// ─── Completed trails ───────────────────────────────────────────────
+// Stored as trail summaries (same shape as planned trails) so the list can reopen them anywhere.
+
+function completedTrails() {
+  return readStorage(STORAGE_KEYS.completed);
+}
+
+function completedIds() {
+  return new Set(completedTrails().map(trail => trail.id));
+}
+
+function isCompleted(trailId) {
+  return completedTrails().some(trail => trail.id === trailId);
+}
+
+function setTrailCompleted(trail, done) {
+  const completed = completedTrails().filter(item => item.id !== trail.id);
+  if (done) completed.unshift({ ...planTrail(trail), completedAt: new Date().toISOString() });
+  saveStorage(STORAGE_KEYS.completed, completed);
+  refreshCompletedViews();
+  showToast(done ? `Marked ${trail.name} as completed.` : `${trail.name} marked not completed.`);
+}
+
+// Completion shows on the map, trail cards, details panel, planner and saved lists.
+function refreshCompletedViews() {
+  highlightSelection();
+  if (currentItems.length) renderResults();
+  renderSaved();
+  if (elements.planner.open) renderPlanner();
+  if (sheetTrail) renderTrailSheet();
+}
+
+// Completed trails near a place, e.g. a favorite destination.
+function completedNear(place) {
+  return completedTrails().filter(trail => trail.center && distanceBetween([place.lat, place.lon], trail.center) <= TRAIL_SEARCH_RADIUS).length;
+}
+
+function completedLabel(count, total) {
+  return total === undefined ? `${count} ${count === 1 ? 'trail' : 'trails'} completed` : `${count}/${total} completed`;
+}
+
+function markerIcon(selected = false, completed = false) {
   return L.divIcon({
     className: '',
-    html: `<div class="custom-marker${selected ? ' selected' : ''}"><span>↗</span></div>`,
+    html: `<div class="custom-marker${selected ? ' selected' : ''}${completed ? ' completed' : ''}"><span>${completed ? '✓' : '↗'}</span></div>`,
     iconSize: [25, 25],
     iconAnchor: [12, 24],
     popupAnchor: [0, -23],
@@ -146,32 +188,48 @@ function focusItem(id, { fly = true } = {}) {
 
 const TRAIL_STYLE = { color: '#54774b', weight: 3, opacity: 0.72 };
 const SELECTED_TRAIL_STYLE = { color: '#d7765a', weight: 5, opacity: 0.95 };
+const COMPLETED_TRAIL_STYLE = { color: '#2f7d9a', weight: 3, opacity: 0.85 };
+
+function trailStyle(selected, completed) {
+  if (selected) return SELECTED_TRAIL_STYLE;
+  return completed ? COMPLETED_TRAIL_STYLE : TRAIL_STYLE;
+}
 
 function highlightSelection() {
+  const done = completedIds();
   layers.eachLayer(layer => {
     const selected = layer.featureId === selectedItemId;
+    const completed = done.has(layer.featureId);
     if (layer.setIcon) {
-      layer.setIcon(markerIcon(selected));
+      layer.setIcon(markerIcon(selected, completed));
       layer.setZIndexOffset(selected ? 1000 : 0);
       return;
     }
-    layer.setStyle(selected ? SELECTED_TRAIL_STYLE : TRAIL_STYLE);
+    layer.setStyle(trailStyle(selected, completed));
     if (selected) layer.bringToFront();
   });
 }
 
 function renderResults() {
   const items = currentItems.slice(0, 45);
-  elements.resultCount.textContent = `${items.length} ${items.length === 1 ? 'TRAIL' : 'TRAILS'}`;
+  const done = completedIds();
+  const doneCount = items.filter(item => done.has(item.id)).length;
+  elements.resultCount.textContent = `${items.length} ${items.length === 1 ? 'TRAIL' : 'TRAILS'}${doneCount ? ` · ${doneCount} DONE` : ''}`;
   if (!items.length) {
     elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">✳</span><p>No mapped hiking trails showed up nearby. Try another search or a wider area.</p></div>';
     return;
   }
-  elements.resultList.innerHTML = items.map(item => `
-    <button class="result-card${item.id === selectedItemId ? ' selected' : ''}" type="button" data-item-id="${escapeHtml(item.id)}">
-      <span class="result-card-top"><strong>${escapeHtml(item.name)}</strong><span class="result-type">${escapeHtml(item.label)}</span></span>
-      <span class="result-meta">${escapeHtml(item.distance)} <b>·</b> ${escapeHtml(item.detail)}</span>
-    </button>`).join('');
+  elements.resultList.innerHTML = items.map(item => {
+    const completed = done.has(item.id);
+    return `
+    <div class="result-card-wrap">
+      <button class="result-card${item.id === selectedItemId ? ' selected' : ''}${completed ? ' completed' : ''}" type="button" data-item-id="${escapeHtml(item.id)}">
+        <span class="result-card-top"><strong>${escapeHtml(item.name)}</strong><span class="result-type">${completed ? '✓ DONE' : escapeHtml(item.label)}</span></span>
+        <span class="result-meta">${escapeHtml(item.distance)} <b>·</b> ${escapeHtml(item.detail)}</span>
+      </button>
+      <label class="result-done" title="${completed ? 'Completed' : 'Mark as completed'}"><input type="checkbox" data-complete-id="${escapeHtml(item.id)}"${completed ? ' checked' : ''} aria-label="Mark ${escapeHtml(item.name)} as completed" /></label>
+    </div>`;
+  }).join('');
 }
 
 // Shown in the trails list while the trail search API calls are still running.
@@ -182,10 +240,12 @@ function renderLoading() {
 
 function drawItems(items) {
   layers.clearLayers();
+  const done = completedIds();
   for (const item of items.slice(0, 100)) {
+    const completed = done.has(item.id);
     // Every trail gets a pin at its midpoint; mapped paths also get their line.
-    const trailLayers = [L.marker(item.center, { icon: markerIcon(), title: item.name })];
-    if (item.lines.length) trailLayers.unshift(L.polyline(item.lines, { ...TRAIL_STYLE, lineCap: 'round' }));
+    const trailLayers = [L.marker(item.center, { icon: markerIcon(false, completed), title: item.name })];
+    if (item.lines.length) trailLayers.unshift(L.polyline(item.lines, { ...trailStyle(false, completed), lineCap: 'round' }));
     for (const layer of trailLayers) {
       layer.featureId = item.id;
       layer.on('click', () => focusItem(item.id, { fly: false }));
@@ -661,25 +721,52 @@ function tripLogMeta(item) {
   if (!item.days) return `${item.date || 'Date not set'} · ${item.hours} hr plan`;
   const totals = planTotals(item);
   const days = `${item.days.length} ${item.days.length === 1 ? 'day' : 'days'}`;
-  return [item.startDate || 'Date not set', days, `${totals.trails} trails`, `${totals.miles.toFixed(1)} mi`].join(' · ');
+  const parts = [item.startDate || 'Date not set', days, `${totals.trails} trails`, `${totals.miles.toFixed(1)} mi`];
+  if (totals.trails) parts.push(completedLabel(planCompletedCount(item), totals.trails));
+  return parts.join(' · ');
 }
+
+function planCompletedCount(target) {
+  const done = completedIds();
+  return target.days.reduce((sum, day) => sum + day.trails.filter(trail => done.has(trail.id)).length, 0);
+}
+
+function favoriteMeta(place) {
+  const count = completedNear(place);
+  return count ? `Favorite destination · ${completedLabel(count)}` : 'Favorite destination';
+}
+
+function completedMeta(trail) {
+  const date = trail.completedAt ? new Date(trail.completedAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  return [date && `Completed ${date}`, trailSummary(trail)].filter(Boolean).join(' · ');
+}
+
+const SAVED_TABS = {
+  favorites: { key: STORAGE_KEYS.favorites, where: 'favorites', empty: 'Your saved places will live here.' },
+  trips: { key: STORAGE_KEYS.trips, where: 'trip log', empty: 'Your completed plans will show up here.' },
+  completed: { key: STORAGE_KEYS.completed, where: 'completed trails', empty: 'Check off a trail to track the hikes you’ve finished.' },
+};
 
 function renderSaved() {
   const favorites = readStorage(STORAGE_KEYS.favorites);
   const trips = readStorage(STORAGE_KEYS.trips);
+  const completed = completedTrails();
   elements.favoriteCount.textContent = favorites.length;
   elements.tripCount.textContent = trips.length;
-  const items = savedTab === 'favorites' ? favorites : trips;
+  elements.completedCount.textContent = completed.length;
+  const items = { favorites, trips, completed }[savedTab];
+  const tab = SAVED_TABS[savedTab];
   if (!items.length) {
-    elements.savedList.innerHTML = `<p class="empty-saved">${savedTab === 'favorites' ? 'Your saved places will live here.' : 'Your completed plans will show up here.'}</p>`;
+    elements.savedList.innerHTML = `<p class="empty-saved">${escapeHtml(tab.empty)}</p>`;
     return;
   }
   const visible = showAllSaved ? items : items.slice(0, SAVED_PREVIEW_LIMIT);
   const rows = visible.map((item, index) => {
-    const title = item.days ? item.name : item.shortName;
-    const metadata = savedTab === 'favorites' ? 'Favorite destination' : tripLogMeta(item);
-    const where = savedTab === 'favorites' ? 'favorites' : 'trip log';
-    return `<div class="saved-item"><button class="saved-item-open" type="button" data-saved-index="${index}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(metadata)}</span></button><button class="remove-saved" type="button" data-remove-index="${index}" aria-label="Remove ${escapeHtml(title)} from ${where}">×</button></div>`;
+    const title = item.days || savedTab === 'completed' ? item.name : item.shortName;
+    const metadata = { favorites: favoriteMeta, trips: tripLogMeta, completed: completedMeta }[savedTab](item);
+    const removeLabel = savedTab === 'completed' ? `Mark ${title} as not completed` : `Remove ${title} from ${tab.where}`;
+    const mark = savedTab === 'completed' ? '<span class="saved-check" aria-hidden="true">✓</span>' : '';
+    return `<div class="saved-item">${mark}<button class="saved-item-open" type="button" data-saved-index="${index}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(metadata)}</span></button><button class="remove-saved" type="button" data-remove-index="${index}" aria-label="${escapeHtml(removeLabel)}">×</button></div>`;
   });
   if (items.length > SAVED_PREVIEW_LIMIT) {
     const label = showAllSaved ? 'Show less' : `Show all ${items.length}`;
@@ -689,9 +776,10 @@ function renderSaved() {
 }
 
 function selectSavedItem(index) {
-  const items = readStorage(savedTab === 'favorites' ? STORAGE_KEYS.favorites : STORAGE_KEYS.trips);
+  const items = readStorage(SAVED_TABS[savedTab].key);
   const item = items[index];
   if (!item) return;
+  if (savedTab === 'completed') return openPlannedTrail(item);
   if (item.days) {
     setPlan(structuredClone(item));
     openPlanner();
@@ -837,6 +925,7 @@ function renderTrailSheet() {
       <div><strong>${escapeHtml(difficulty.label)}</strong><span>DIFFICULTY</span></div>
     </div>
     <p class="sheet-note">${escapeHtml(difficulty.note)}</p>
+    <label class="sheet-done${isCompleted(trail.id) ? ' is-done' : ''}"><input type="checkbox" id="sheet-completed"${isCompleted(trail.id) ? ' checked' : ''} /> <span>${isCompleted(trail.id) ? 'Completed ✓' : 'Mark as completed'}</span></label>
     <div class="sheet-elevation"><span class="field-label">ELEVATION</span><p>${escapeHtml(elevationText(trail))}</p></div>
     ${facts.length ? `<dl class="sheet-facts">${facts.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>` : ''}
     ${tags.description ? `<p class="sheet-description">${escapeHtml(tags.description)}</p>` : ''}
@@ -1049,8 +1138,10 @@ function dayMarkup(day, index, leg) {
   const destination = day.destination;
   const date = dayDate(index);
   const canUseMap = currentPlace && destination?.name !== currentPlace.name;
+  const done = completedIds();
   const trails = day.trails.map((trail, trailIndex) => `
-    <li class="plan-trail">
+    <li class="plan-trail${done.has(trail.id) ? ' completed' : ''}">
+      <input class="plan-trail-done" type="checkbox" data-complete-trail="${index}:${trailIndex}"${done.has(trail.id) ? ' checked' : ''} aria-label="Mark ${escapeHtml(trail.name)} as completed" title="Completed" />
       <button class="plan-trail-open" type="button" data-plan-trail="${index}:${trailIndex}"><strong>${escapeHtml(trail.name)}</strong><span>${escapeHtml(trailSummary(trail))}</span></button>
       <button class="remove-saved" type="button" data-remove-trail="${index}:${trailIndex}" aria-label="Remove ${escapeHtml(trail.name)} from day ${index + 1}">×</button>
     </li>`).join('');
@@ -1158,6 +1249,18 @@ elements.trailSheet.addEventListener('click', event => {
   if (action === 'add') addTrailToPlan(sheetTrail, elements.trailSheet.querySelector('#sheet-day').value);
   if (action === 'remove') removeTrailFromPlan(sheetTrail.id);
   if (action === 'planner') openPlanner();
+});
+
+elements.trailSheet.addEventListener('change', event => {
+  if (event.target.id === 'sheet-completed' && sheetTrail) setTrailCompleted(sheetTrail, event.target.checked);
+});
+
+elements.planDays.addEventListener('change', event => {
+  const value = event.target.dataset?.completeTrail;
+  if (value === undefined) return;
+  const { day, trailIndex } = dayAndTrail(value);
+  const trail = day?.trails[trailIndex];
+  if (trail) setTrailCompleted(trail, event.target.checked);
 });
 
 elements.planner.addEventListener('click', event => {
@@ -1321,6 +1424,12 @@ elements.resultList.addEventListener('click', event => {
   if (button) focusItem(button.dataset.itemId);
 });
 
+elements.resultList.addEventListener('change', event => {
+  const id = event.target.dataset?.completeId;
+  const item = id && currentItems.find(candidate => candidate.id === id);
+  if (item) setTrailCompleted(item, event.target.checked);
+});
+
 elements.savePlace.addEventListener('click', toggleFavorite);
 elements.planTrip.addEventListener('click', openPlanner);
 
@@ -1343,12 +1452,13 @@ elements.savedList.addEventListener('click', event => {
   }
   const removeButton = event.target.closest('[data-remove-index]');
   if (removeButton) {
-    const key = savedTab === 'favorites' ? STORAGE_KEYS.favorites : STORAGE_KEYS.trips;
+    const key = SAVED_TABS[savedTab].key;
     const items = readStorage(key);
     items.splice(Number(removeButton.dataset.removeIndex), 1);
     saveStorage(key, items);
     updateSaveButton();
-    renderSaved();
+    if (savedTab === 'completed') refreshCompletedViews();
+    else renderSaved();
     return;
   }
   const button = event.target.closest('[data-saved-index]');
