@@ -101,6 +101,33 @@
         <div class="map-legend"><span><i class="legend-dot trail-dot"></i>HIKING TRAILS</span><span><i class="legend-dot done-dot"></i>COMPLETED</span></div>
         <div class="results-dock">
           <div class="dock-head"><div><p class="eyebrow">OUT THERE, NEARBY</p><h2 id="results-title">A good place to start</h2></div><span class="result-count" id="result-count">0 TRAILS</span></div>
+          <div class="trail-filters" role="group" aria-label="Filter trails">
+            <div class="filter-group" role="group" aria-labelledby="filter-difficulty-label">
+              <span class="filter-label" id="filter-difficulty-label">DIFFICULTY</span>
+              <div class="filter-chips" id="filter-difficulty"></div>
+            </div>
+            <label class="filter-group"><span class="filter-label">LENGTH</span>
+              <select id="filter-length" class="filter-select">
+                <option value="any">Any length</option>
+                <option value="short">Under 2 mi</option>
+                <option value="medium">2–5 mi</option>
+                <option value="long">5–10 mi</option>
+                <option value="epic">10+ mi</option>
+                <option value="unknown">Length unknown</option>
+              </select>
+            </label>
+            <label class="filter-group"><span class="filter-label">EST. TIME</span>
+              <select id="filter-time" class="filter-select">
+                <option value="any">Any time</option>
+                <option value="quick">Under 1 hr</option>
+                <option value="short">1–2 hr</option>
+                <option value="half">2–4 hr</option>
+                <option value="long">4+ hr</option>
+                <option value="unknown">Time unknown</option>
+              </select>
+            </label>
+            <button class="text-button filter-clear" id="filter-clear" type="button" hidden>Clear filters</button>
+          </div>
           <div class="result-list" id="result-list"><div class="empty-results"><span class="empty-sun">✳</span><p>Search a destination to find<br />hiking trails nearby.</p></div></div>
         </div>
         <div class="map-credit">MAP DATA © OPENSTREETMAP CONTRIBUTORS</div>
