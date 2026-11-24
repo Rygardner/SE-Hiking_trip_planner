@@ -24,6 +24,10 @@ const elements = {
   resultTitle: document.querySelector('#results-title'),
   resultCount: document.querySelector('#result-count'),
   resultList: document.querySelector('#result-list'),
+  difficultyChips: document.querySelector('#filter-difficulty'),
+  filterLength: document.querySelector('#filter-length'),
+  filterTime: document.querySelector('#filter-time'),
+  filterClear: document.querySelector('#filter-clear'),
   weatherSummary: document.querySelector('#weather-summary'),
   weatherTemp: document.querySelector('#weather-temp'),
   weatherIcon: document.querySelector('#weather-icon'),
@@ -210,13 +214,172 @@ function highlightSelection() {
   });
 }
 
+// ─── Trail filters ──────────────────────────────────────────────────
+// Missing data is its own choice in every filter ("Not rated", "Length unknown", "Time unknown"),
+// so an unrated trail is never lumped in with easy ones.
+
+const DIFFICULTY_GROUPS = [
+  { id: 'easy', label: 'Easy', scales: ['hiking'] },
+  { id: 'moderate', label: 'Moderate', scales: ['mountain_hiking'] },
+  { id: 'challenging', label: 'Challenging', scales: ['demanding_mountain_hiking'] },
+  { id: 'difficult', label: 'Difficult+', scales: ['alpine_hiking', 'demanding_alpine_hiking', 'difficult_alpine_hiking'] },
+  { id: 'unrated', label: 'Not rated', scales: [] },
+];
+// [min, max) in miles and in minutes.
+const LENGTH_RANGES = { short: [0, 2], medium: [2, 5], long: [5, 10], epic: [10, Infinity] };
+const TIME_RANGES = { quick: [0, 60], short: [60, 120], half: [120, 240], long: [240, Infinity] };
+const FILTER_KEY = 'wilderpath:trail-filters';
+const DEFAULT_FILTERS = { difficulty: [], length: 'any', time: 'any' };
+let trailFilters = readFilters();
+
+function readFilters() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(FILTER_KEY)) || {};
+    const groups = DIFFICULTY_GROUPS.map(group => group.id);
+    return {
+      difficulty: Array.isArray(stored.difficulty) ? stored.difficulty.filter(id => groups.includes(id)) : [],
+      length: stored.length in LENGTH_RANGES || stored.length === 'unknown' ? stored.length : 'any',
+      time: stored.time in TIME_RANGES || stored.time === 'unknown' ? stored.time : 'any',
+    };
+  } catch { return { ...DEFAULT_FILTERS }; }
+}
+
+function saveFilters() {
+  try { localStorage.setItem(FILTER_KEY, JSON.stringify(trailFilters)); }
+  catch { /* Filters still work for this visit. */ }
+}
+
+// ─── Your own difficulty ratings ────────────────────────────────────
+// Stored by trail id as an OSM sac_scale value. A rating of yours wins over the map's.
+const RATING_KEY = 'wilderpath:difficulty-ratings';
+
+function readRatings() {
+  try {
+    const ratings = JSON.parse(localStorage.getItem(RATING_KEY));
+    return ratings && typeof ratings === 'object' && !Array.isArray(ratings) ? ratings : {};
+  } catch { return {}; }
+}
+
+function mappedDifficulty(trail) {
+  return trail.difficulty || trail.tags?.sac_scale || '';
+}
+
+function userDifficulty(trail) {
+  const rating = readRatings()[trail.id];
+  return DIFFICULTY[rating] ? rating : '';
+}
+
+function trailDifficulty(trail) {
+  return userDifficulty(trail) || mappedDifficulty(trail);
+}
+
+// An empty value removes your rating and goes back to the map's.
+function setUserDifficulty(trail, value) {
+  const ratings = readRatings();
+  if (DIFFICULTY[value]) ratings[trail.id] = value;
+  else delete ratings[trail.id];
+  try { localStorage.setItem(RATING_KEY, JSON.stringify(ratings)); }
+  catch { return showToast('Could not save your rating in this browser.'); }
+  if (currentItems.length) {
+    drawItems(filteredItems());
+    highlightSelection();
+    renderResults();
+  }
+  renderSaved();
+  if (elements.planner.open) renderPlanner();
+  if (sheetTrail) renderTrailSheet();
+  const hidden = currentItems.some(item => item.id === trail.id) && !matchesFilters(trail);
+  const message = DIFFICULTY[value] ? `Rated ${trail.name} as ${DIFFICULTY[value].label}.` : `Removed your rating for ${trail.name}.`;
+  showToast(hidden ? `${message} Your filters now hide it.` : message);
+}
+
+function difficultyGroup(sacScale) {
+  return DIFFICULTY_GROUPS.find(group => group.scales.includes(sacScale))?.id || 'unrated';
+}
+
+// null means the trail has no usable mapped length, so its time can't be estimated either.
+function trailMiles(trail) {
+  return trail.length > 0 ? metersToMiles(trail.length) : null;
+}
+
+function trailMinutes(trail) {
+  return trail.length > 0 ? hikeMinutes(trail.length, trailElevation(trail)?.climbFt) : null;
+}
+
+function inRange(value, choice, ranges) {
+  if (choice === 'any') return true;
+  if (choice === 'unknown') return value === null;
+  const [min, max] = ranges[choice] || [];
+  return value !== null && value >= min && value < max;
+}
+
+function matchesFilters(trail, filters = trailFilters) {
+  return (!filters.difficulty.length || filters.difficulty.includes(difficultyGroup(trailDifficulty(trail))))
+    && inRange(trailMiles(trail), filters.length, LENGTH_RANGES)
+    && inRange(trailMinutes(trail), filters.time, TIME_RANGES);
+}
+
+function filtersActive(filters = trailFilters) {
+  return filters.difficulty.length > 0 || filters.length !== 'any' || filters.time !== 'any';
+}
+
+function filteredItems() {
+  return currentItems.filter(item => matchesFilters(item));
+}
+
+function difficultyBadge(trail) {
+  const sacScale = trailDifficulty(trail);
+  const group = difficultyGroup(sacScale);
+  if (group === 'unrated') return '<span class="difficulty-badge unrated" title="No difficulty rating is mapped for this trail. It is not necessarily easy.">? Not rated</span>';
+  if (userDifficulty(trail)) return `<span class="difficulty-badge ${group} user-rated" title="Your rating">✎ ${escapeHtml(DIFFICULTY[sacScale].label)}</span>`;
+  return `<span class="difficulty-badge ${group}">${escapeHtml(DIFFICULTY[sacScale].label)}</span>`;
+}
+
+function trailStatsMarkup(trail) {
+  const miles = trailMiles(trail);
+  if (miles === null) return '<span class="missing-info">Length &amp; time unknown</span>';
+  return `${miles.toFixed(1)} mi <b>·</b> ~${escapeHtml(formatDuration(trailMinutes(trail) * 60))}`;
+}
+
+function renderFilters() {
+  elements.difficultyChips.innerHTML = DIFFICULTY_GROUPS.map(group => {
+    const pressed = trailFilters.difficulty.includes(group.id);
+    return `<button class="filter-chip ${group.id}" type="button" data-difficulty="${group.id}" aria-pressed="${pressed}">${escapeHtml(group.label)}</button>`;
+  }).join('');
+  elements.filterLength.value = trailFilters.length;
+  elements.filterTime.value = trailFilters.time;
+  elements.filterClear.hidden = !filtersActive();
+}
+
+// Filters change both the list and the map pins/lines.
+function applyFilters() {
+  saveFilters();
+  renderFilters();
+  if (!currentItems.length) return;
+  drawItems(filteredItems());
+  highlightSelection();
+  renderResults();
+}
+
+function clearFilters() {
+  trailFilters = { ...DEFAULT_FILTERS, difficulty: [] };
+  applyFilters();
+}
+
 function renderResults() {
-  const items = currentItems.slice(0, 45);
+  const matching = filteredItems();
+  const items = matching.slice(0, 45);
   const done = completedIds();
   const doneCount = items.filter(item => done.has(item.id)).length;
-  elements.resultCount.textContent = `${items.length} ${items.length === 1 ? 'TRAIL' : 'TRAILS'}${doneCount ? ` · ${doneCount} DONE` : ''}`;
-  if (!items.length) {
+  const shown = filtersActive() && currentItems.length ? `${matching.length} OF ${currentItems.length}` : `${items.length}`;
+  const noun = (filtersActive() ? currentItems.length : items.length) === 1 ? 'TRAIL' : 'TRAILS';
+  elements.resultCount.textContent = `${shown} ${noun}${doneCount ? ` · ${doneCount} DONE` : ''}`;
+  if (!currentItems.length) {
     elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">✳</span><p>No mapped hiking trails showed up nearby. Try another search or a wider area.</p></div>';
+    return;
+  }
+  if (!items.length) {
+    elements.resultList.innerHTML = '<div class="empty-results"><span class="empty-sun">⌀</span><p>No trails here match these filters.<br /><button class="text-button" type="button" data-clear-filters>Clear filters</button></p></div>';
     return;
   }
   elements.resultList.innerHTML = items.map(item => {
@@ -224,8 +387,8 @@ function renderResults() {
     return `
     <div class="result-card-wrap">
       <button class="result-card${item.id === selectedItemId ? ' selected' : ''}${completed ? ' completed' : ''}" type="button" data-item-id="${escapeHtml(item.id)}">
-        <span class="result-card-top"><strong>${escapeHtml(item.name)}</strong><span class="result-type">${completed ? '✓ DONE' : escapeHtml(item.label)}</span></span>
-        <span class="result-meta">${escapeHtml(item.distance)} <b>·</b> ${escapeHtml(item.detail)}</span>
+        <span class="result-card-top"><strong>${escapeHtml(item.name)}</strong><span class="result-type">${completed ? '✓ DONE' : escapeHtml(item.distance.toUpperCase())}</span></span>
+        <span class="result-meta">${difficultyBadge(item)} ${trailStatsMarkup(item)}</span>
       </button>
       <label class="result-done" title="${completed ? 'Completed' : 'Mark as completed'}"><input type="checkbox" data-complete-id="${escapeHtml(item.id)}"${completed ? ' checked' : ''} aria-label="Mark ${escapeHtml(item.name)} as completed" /></label>
     </div>`;
@@ -265,7 +428,7 @@ const DIFFICULTY = {
 };
 
 function difficultyInfo(sacScale) {
-  return DIFFICULTY[sacScale] || { label: 'Not rated', note: 'No difficulty rating is mapped for this trail.' };
+  return DIFFICULTY[sacScale] || { label: 'Not rated', note: 'No difficulty rating is mapped for this trail. That doesn’t mean it’s easy, so check a local source before you go.' };
 }
 
 const metersToMiles = meters => meters / 1609.344;
@@ -274,12 +437,6 @@ const metersToFeet = meters => meters * 3.28084;
 // "Book time": 2 mph on the flat plus 30 minutes per 1,000 ft of climbing.
 function hikeMinutes(lengthMeters, climbFeet = 0) {
   return metersToMiles(lengthMeters) / 2 * 60 + climbFeet / 1000 * 30;
-}
-
-function detailFor(difficulty, length) {
-  const label = DIFFICULTY[difficulty]?.label || 'Trail';
-  if (!(length > 0)) return `${label} · Route details vary`;
-  return `${label} · ${metersToMiles(length).toFixed(1)} mi · ~${formatDuration(hikeMinutes(length) * 60)}`;
 }
 
 const OVERPASS_ENDPOINTS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter'];
@@ -463,7 +620,7 @@ function trailToItem(trail, place) {
   const center = longest.length ? longest[Math.floor(longest.length / 2)] : trail.point;
   const length = trail.lines.reduce((total, line) => total + lineLength(line), 0);
   const distance = distanceBetween([place.lat, place.lon], center);
-  return { ...trail, center, start: trailStart(trail, place), length, distanceValue: distance, distance: `${formatDistance(distance)} away`, label: 'TRAIL', detail: detailFor(trail.difficulty, length) };
+  return { ...trail, center, start: trailStart(trail, place), length, distanceValue: distance, distance: `${formatDistance(distance)} away` };
 }
 
 async function loadNearby(place) {
@@ -493,7 +650,7 @@ async function loadNearby(place) {
     if (place !== currentPlace) return;
     const renderStart = performance.now(); // TEMP timing
     currentItems = trails.map(trail => trailToItem(trail, place)).sort((a, b) => a.distanceValue - b.distanceValue);
-    drawItems(currentItems);
+    drawItems(filteredItems());
     renderResults();
     logTrailTiming(`RENDER          ${(performance.now() - renderStart).toFixed(0)} ms`); // TEMP timing
     logTrailTiming(`=== LOAD DONE   total ${(performance.now() - loadStart).toFixed(0)} ms`); // TEMP timing
@@ -870,6 +1027,11 @@ async function loadElevation(trail) {
     };
     elevationCache.set(trail.id, result);
     updatePlannedElevation(trail.id, result);
+    // Climbing changes the time estimate, which the cards and the time filter use.
+    if (currentItems.some(item => item.id === trail.id)) {
+      if (trailFilters.time !== 'any') { drawItems(filteredItems()); highlightSelection(); }
+      renderResults();
+    }
   } catch (error) {
     console.error('Elevation lookup failed:', error);
     elevationCache.set(trail.id, 'error');
@@ -890,9 +1052,12 @@ function renderTrailSheet() {
   const trail = sheetTrail;
   if (!trail) return;
   const tags = trail.tags || {};
-  const difficulty = difficultyInfo(trail.difficulty || tags.sac_scale);
+  const difficulty = difficultyInfo(trailDifficulty(trail));
   const climb = trailElevation(trail)?.climbFt;
   const hasLength = trail.length > 0;
+  const unrated = difficultyGroup(trailDifficulty(trail)) === 'unrated';
+  const yourRating = userDifficulty(trail);
+  const mapLabel = DIFFICULTY[mappedDifficulty(trail)]?.label;
   const facts = [
     currentPlace && trail.center && [`From ${currentPlace.shortName}`, formatDistance(distanceBetween([currentPlace.lat, currentPlace.lon], trail.center))],
     ['Surface', tags.surface && tagText(tags.surface)],
@@ -920,11 +1085,18 @@ function renderTrailSheet() {
       <button class="sheet-close" type="button" data-sheet-action="close" aria-label="Close trail details">×</button>
     </header>
     <div class="sheet-stats">
-      <div><strong>${hasLength ? `${metersToMiles(trail.length).toFixed(1)} mi` : '—'}</strong><span>MAPPED LENGTH</span></div>
-      <div><strong>${hasLength ? `~${formatDuration(hikeMinutes(trail.length, climb) * 60)}` : '—'}</strong><span>EST. TIME</span></div>
-      <div><strong>${escapeHtml(difficulty.label)}</strong><span>DIFFICULTY</span></div>
+      <div${hasLength ? '' : ' class="missing-stat"'}><strong>${hasLength ? `${metersToMiles(trail.length).toFixed(1)} mi` : 'Unknown'}</strong><span>MAPPED LENGTH</span></div>
+      <div${hasLength ? '' : ' class="missing-stat"'}><strong>${hasLength ? `~${formatDuration(hikeMinutes(trail.length, climb) * 60)}` : 'Unknown'}</strong><span>EST. TIME</span></div>
+      <div${unrated ? ' class="missing-stat"' : ''}><strong>${unrated ? '? Not rated' : `${yourRating ? '✎ ' : ''}${escapeHtml(difficulty.label)}`}</strong><span>${yourRating ? 'YOUR RATING' : 'DIFFICULTY'}</span></div>
     </div>
-    <p class="sheet-note">${escapeHtml(difficulty.note)}</p>
+    <p class="sheet-note">${escapeHtml(difficulty.note)}${yourRating ? ` <em>Map data: ${escapeHtml(mapLabel || 'not rated')}.</em>` : ''}</p>
+    <div class="sheet-rating">
+      <label class="field-label" for="sheet-rating">${yourRating ? 'CHANGE YOUR RATING' : 'RATE THIS TRAIL'}</label>
+      <select id="sheet-rating" class="input-field">
+        <option value=""${yourRating ? '' : ' selected'}>${mapLabel ? `Use map rating · ${escapeHtml(mapLabel)}` : 'No rating'}</option>
+        ${Object.entries(DIFFICULTY).map(([value, info]) => `<option value="${value}"${value === yourRating ? ' selected' : ''}>${escapeHtml(info.label)}: ${escapeHtml(info.note)}</option>`).join('')}
+      </select>
+    </div>
     <label class="sheet-done${isCompleted(trail.id) ? ' is-done' : ''}"><input type="checkbox" id="sheet-completed"${isCompleted(trail.id) ? ' checked' : ''} /> <span>${isCompleted(trail.id) ? 'Completed ✓' : 'Mark as completed'}</span></label>
     <div class="sheet-elevation"><span class="field-label">ELEVATION</span><p>${escapeHtml(elevationText(trail))}</p></div>
     ${facts.length ? `<dl class="sheet-facts">${facts.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>` : ''}
@@ -1128,9 +1300,10 @@ function dayDate(index) {
 }
 
 function trailSummary(trail) {
-  const parts = [DIFFICULTY[trail.difficulty]?.label || 'Not rated'];
-  if (trail.length > 0) parts.unshift(`${metersToMiles(trail.length).toFixed(1)} mi`, `~${formatDuration(hikeMinutes(trail.length, trail.elevation?.climbFt) * 60)}`);
-  return parts.join(' · ');
+  const label = DIFFICULTY[trailDifficulty(trail)]?.label;
+  const difficulty = label ? `${label}${userDifficulty(trail) ? ' (your rating)' : ''}` : 'Not rated';
+  if (!(trail.length > 0)) return `Length & time unknown · ${difficulty}`;
+  return [`${metersToMiles(trail.length).toFixed(1)} mi`, `~${formatDuration(hikeMinutes(trail.length, trail.elevation?.climbFt) * 60)}`, difficulty].join(' · ');
 }
 
 function dayMarkup(day, index, leg) {
@@ -1253,6 +1426,7 @@ elements.trailSheet.addEventListener('click', event => {
 
 elements.trailSheet.addEventListener('change', event => {
   if (event.target.id === 'sheet-completed' && sheetTrail) setTrailCompleted(sheetTrail, event.target.checked);
+  if (event.target.id === 'sheet-rating' && sheetTrail) setUserDifficulty(sheetTrail, event.target.value);
 });
 
 elements.planDays.addEventListener('change', event => {
@@ -1419,7 +1593,21 @@ elements.nearMe.addEventListener('click', () => {
   );
 });
 
+elements.difficultyChips.addEventListener('click', event => {
+  const id = event.target.closest('[data-difficulty]')?.dataset.difficulty;
+  if (!id) return;
+  const selected = new Set(trailFilters.difficulty);
+  if (selected.has(id)) selected.delete(id);
+  else selected.add(id);
+  trailFilters.difficulty = DIFFICULTY_GROUPS.map(group => group.id).filter(group => selected.has(group));
+  applyFilters();
+});
+elements.filterLength.addEventListener('change', () => { trailFilters.length = elements.filterLength.value; applyFilters(); });
+elements.filterTime.addEventListener('change', () => { trailFilters.time = elements.filterTime.value; applyFilters(); });
+elements.filterClear.addEventListener('click', clearFilters);
+
 elements.resultList.addEventListener('click', event => {
+  if (event.target.closest('[data-clear-filters]')) return clearFilters();
   const button = event.target.closest('[data-item-id]');
   if (button) focusItem(button.dataset.itemId);
 });
@@ -1471,6 +1659,7 @@ elements.startTime.addEventListener('change', () => { if (currentPlace) loadWeat
 elements.hikeHours.addEventListener('change', () => { if (currentPlace) loadWeather(currentPlace); });
 
 initializeDate();
+renderFilters();
 readFuelInputs();
 renderSaved();
 refreshPlanViews();

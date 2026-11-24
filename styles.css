@@ -112,7 +112,7 @@ h1 em { color: var(--green); font-weight: 500; }
 .result-type { color: var(--coral); font-family: var(--mono); font-size: 7px; white-space: nowrap; }
 .result-meta { margin-top: 6px; color: #849082; font-size: 9px; }
 .result-meta b { padding: 0 3px; color: #bcc3b6; font-weight: 400; }
-.map-credit { position: absolute; z-index: 500; right: 18px; bottom: 228px; padding: 4px 6px; background: #f7f6f0d9; color: #7c8779; font-size: 7px; }
+.map-credit { position: absolute; z-index: 500; right: 18px; bottom: 266px; padding: 4px 6px; background: #f7f6f0d9; color: #7c8779; font-size: 7px; }
 .toast { position: absolute; z-index: 1000; top: 74px; left: 50%; max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 2px; background: var(--ink); color: white; font-size: 11px; opacity: 0; pointer-events: none; transform: translate(-50%, -7px); transition: opacity .2s, transform .2s; }
 .toast.visible { opacity: 1; transform: translate(-50%, 0); }
 .custom-marker { width: 25px; height: 25px; display: grid; place-items: center; border: 2px solid white; border-radius: 50% 50% 50% 2px; background: var(--green); color: white; font-size: 11px; transform: rotate(-45deg); box-shadow: 0 2px 6px #183c3260; }
@@ -142,7 +142,7 @@ h1 em { color: var(--green); font-weight: 500; }
 .remove-saved:disabled { opacity: .3; cursor: default; }
 
 /* Trail details panel */
-.trail-sheet { position: absolute; z-index: 600; top: 68px; left: 20px; max-height: calc(100% - 296px); width: 330px; padding: 16px 16px 12px; overflow-y: auto; border: 1px solid #e5e4da; border-radius: 3px; background: #f7f6f0fa; box-shadow: 0 5px 25px #30473526; }
+.trail-sheet { position: absolute; z-index: 600; top: 68px; left: 20px; max-height: calc(100% - 334px); width: 330px; padding: 16px 16px 12px; overflow-y: auto; border: 1px solid #e5e4da; border-radius: 3px; background: #f7f6f0fa; box-shadow: 0 5px 25px #30473526; }
 .trail-sheet[hidden] { display: none; }
 .sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .sheet-head .eyebrow { margin-bottom: 4px; }
@@ -227,9 +227,11 @@ h1 em { color: var(--green); font-weight: 500; }
   .map-topline { top: 12px; right: 12px; left: 12px; }
   .map-legend { top: 58px; right: 12px; }
   .results-dock { right: 9px; bottom: 9px; left: 9px; padding: 13px 12px 9px; }
-  .map-credit { bottom: 222px; right: 10px; }
+  .map-credit { bottom: 260px; right: 10px; }
   .dock-head h2 { font-size: 20px; }
-  .trail-sheet { top: 58px; right: 9px; left: 9px; width: auto; max-height: calc(100% - 280px); }
+  .trail-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .filter-group { flex: 0 0 auto; }
+  .trail-sheet { top: 58px; right: 9px; left: 9px; width: auto; max-height: calc(100% - 318px); }
   .planner { max-height: calc(100vh - 16px); }
   .planner-head, .planner-fields, .planner-summary, .plan-days, .planner-foot { padding-right: 14px; padding-left: 14px; }
   .planner-fields { grid-template-columns: 1fr; }
@@ -258,3 +260,36 @@ h1 em { color: var(--green); font-weight: 500; }
 .sheet-done.is-done { border-color: #9cc3d2; background: #eef6f8; color: #2f7d9a; }
 .plan-trail.completed .plan-trail-open strong { color: #2f7d9a; }
 .saved-check { align-self: center; color: #2f7d9a; font-size: 12px; font-weight: 700; }
+
+/* Trail filters and difficulty labels */
+.trail-filters { margin: -3px 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px 16px; }
+.filter-group { display: flex; align-items: center; gap: 7px; }
+.filter-label { color: #899286; font-family: var(--mono); font-size: 8px; letter-spacing: .45px; white-space: nowrap; }
+.filter-chips { display: flex; gap: 4px; }
+.filter-chip { padding: 4px 8px; border: 1px solid #d3d8cc; border-radius: 20px; background: #fbfaf5; color: #4d5e52; font-size: 9px; white-space: nowrap; cursor: pointer; transition: background-color .15s, border-color .15s; }
+.filter-chip:hover { border-color: #9aa996; }
+.filter-chip[aria-pressed="true"] { border-color: var(--green); background: var(--green); color: #fff; }
+.filter-chip.unrated { border-style: dashed; font-style: italic; }
+.filter-chip.unrated[aria-pressed="true"] { border-style: solid; border-color: #6d7a6e; background: #6d7a6e; }
+.filter-select { padding: 4px 6px; border: 1px solid #d3d8cc; border-radius: 2px; background: #fbfaf5; color: var(--ink); font-size: 9px; cursor: pointer; }
+.filter-select:focus-visible, .filter-chip:focus-visible { outline: 2px solid var(--coral); outline-offset: 1px; }
+.filter-clear { padding: 0; color: var(--coral); font-family: var(--mono); font-size: 8px; letter-spacing: .45px; white-space: nowrap; }
+.filter-clear[hidden] { display: none; }
+.empty-results .text-button { padding-top: 4px; color: var(--coral); }
+
+.result-meta { display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+.difficulty-badge { margin-right: 4px; padding: 1px 5px; border: 1px solid transparent; border-radius: 2px; font-family: var(--mono); font-size: 7px; letter-spacing: .4px; text-transform: uppercase; }
+.difficulty-badge.easy { background: #e4efd8; color: #3c6a35; }
+.difficulty-badge.moderate { background: #f3ecd0; color: #7a6320; }
+.difficulty-badge.challenging { background: #f6e0d6; color: #a4482c; }
+.difficulty-badge.difficult { background: #8b3a2b; color: #fff; }
+/* Unrated is deliberately hollow and gray so it can't be mistaken for Easy. */
+.difficulty-badge.unrated { border: 1px dashed #a5aea2; background: transparent; color: #747f72; font-style: italic; }
+.missing-info { color: #9aa397; font-style: italic; }
+.sheet-stats .missing-stat strong { color: #8c9588; font-style: italic; font-weight: 500; }
+
+/* Your own difficulty ratings */
+.sheet-rating { margin-top: 10px; display: grid; gap: 5px; }
+.sheet-rating select { width: 100%; font-size: 11px; }
+.sheet-note em { color: #8c9588; }
+.difficulty-badge.user-rated { border-color: currentColor; }

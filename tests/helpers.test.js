@@ -52,8 +52,8 @@ describe('helper functions', () => {
     // Book time: 2 mph plus 30 min per 1,000 ft.
     assert.equal(Math.round(fn('hikeMinutes')(1609.344 * 4)), 120);
     assert.equal(Math.round(fn('hikeMinutes')(1609.344 * 4, 2000)), 180);
-    assert.equal(fn('detailFor')('hiking', 1609.344 * 4), 'Easy · 4.0 mi · ~2 hr 0 min');
-    assert.equal(fn('detailFor')('', 0), 'Trail · Route details vary');
+    assert.equal(fn('trailSummary')({ difficulty: 'hiking', length: 1609.344 * 4 }), '4.0 mi · ~2 hr 0 min · Easy');
+    assert.equal(fn('trailSummary')({ difficulty: '', length: 0 }), 'Length & time unknown · Not rated');
   });
 
   it('only allows http(s) website links', () => {

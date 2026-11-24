@@ -25,7 +25,7 @@ describe('location search', () => {
     assert.equal(app.$('#map-place').textContent, GOLDEN.name.toUpperCase());
     assert.equal(app.$('#result-count').textContent, '2 TRAILS');
     assert.deepEqual(cards(app).map(card => card.querySelector('strong').textContent), ['Bear Creek Trail (241)', 'Mesa Loop']);
-    assert.match(cards(app)[0].textContent, /Moderate · 0\.9 mi/);
+    assert.match(cards(app)[0].textContent, /Moderate 0\.9 mi/);
     assert.ok(!isLoading(app));
 
     // One marker per trail, plus a line for each.
