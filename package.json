@@ -3,7 +3,7 @@
   "private": true,
   "description": "Hiking trip planner",
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test \"tests/*.test.js\""
   },
   "devDependencies": {
     "jsdom": "24.1.3"

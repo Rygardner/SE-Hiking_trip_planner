@@ -53,9 +53,7 @@ h1 em { color: var(--green); font-weight: 500; }
 .gear-panel { padding: 15px 0 13px; border-bottom: 1px solid var(--line); }
 .section-heading { margin-bottom: 10px; }
 .tiny-mark { color: #8c9588; font-size: 8px; }
-.gear-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
-.gear-list li { display: flex; align-items: center; gap: 6px; color: #536452; font-size: 10px; }
-.gear-list li::before { content: ''; width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: var(--coral); }
+.gear-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 5px; }
 .cost-panel { padding: 14px 0 13px; border-bottom: 1px solid var(--line); }
 .cost-inputs { display: grid; grid-template-columns: 1.25fr .85fr .95fr; gap: 7px; }
 .cost-inputs label span { color: #788575; font-size: 9px; }
@@ -293,3 +291,51 @@ h1 em { color: var(--green); font-weight: 500; }
 .sheet-rating select { width: 100%; font-size: 11px; }
 .sheet-note em { color: #8c9588; }
 .difficulty-badge.user-rated { border-color: currentColor; }
+
+/* Packing checklist */
+.pack-subhead { margin: 0 0 6px; color: #8c9588; font-family: var(--mono); font-size: 8px; letter-spacing: .45px; }
+.pack-add-all + .pack-subhead { margin-top: 12px; }
+.pack-check { min-width: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pack-check input { width: 13px; height: 13px; margin: 0; flex: 0 0 auto; accent-color: var(--green); cursor: pointer; }
+.pack-check span { overflow-wrap: anywhere; }
+.is-packed .pack-check span { color: #9aa397; text-decoration: line-through; }
+.pack-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid #e2e4dc; }
+.pack-list li { min-height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #e2e4dc; color: #536452; font-size: 10px; }
+.pack-list li.pack-empty { color: #929b90; font-style: italic; }
+.pack-remove { padding: 0 5px; border: 0; background: transparent; color: #8d9389; font-size: 14px; cursor: pointer; }
+.pack-remove:not(:disabled):hover { color: var(--coral); }
+.pack-remove:disabled { opacity: .3; cursor: default; }
+.pack-row { margin-top: 7px; display: flex; align-items: center; gap: 6px; }
+.pack-row .input-field { min-width: 0; height: 30px; margin: 0; }
+.pack-row .ghost-button { height: 30px; }
+.pack-row .ghost-button:disabled { cursor: default; }
+.pack-row select:disabled { color: #929b90; }
+.pack-lists { margin-top: 12px; }
+.gear-panel > .text-button { padding-top: 9px; }
+.tiny-mark.all-packed { color: var(--green); font-weight: 500; }
+
+/* Packing checklist in the trip planner */
+.pack-trip { margin: -4px 0 9px; color: #8c9588; font-size: 9px; }
+.plan-packing { margin: 0 22px; border-bottom: 1px solid var(--line); }
+.plan-packing summary { padding: 10px 0; display: flex; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; }
+.plan-packing summary::-webkit-details-marker { display: none; }
+.plan-packing summary .field-label::before { content: '▸ '; }
+.plan-packing[open] summary .field-label::before { content: '▾ '; }
+.plan-packing-body { max-height: 360px; padding-bottom: 12px; overflow-y: auto; }
+@media (max-width: 800px) { .plan-packing { margin: 0 14px; } }
+
+/* Forecast suggestions you pick into the checklist */
+.suggestion { padding: 4px 8px; border: 1px dashed #b9c2b3; border-radius: 20px; background: #fbfaf5; color: #4d5e52; font-size: 10px; cursor: pointer; transition: background-color .15s, border-color .15s; }
+.suggestion::before { content: '＋ '; color: var(--coral); }
+.suggestion:hover { border-color: var(--green); }
+.suggestion.is-added { border-style: solid; border-color: var(--green); background: #e7efe0; color: var(--green); }
+.suggestion.is-added::before { content: '✓ '; color: var(--green); }
+.suggestion:focus-visible { outline: 2px solid var(--coral); outline-offset: 1px; }
+.text-button.pack-add-all { padding: 6px 0 0; font-weight: 600; }
+.pack-add-all[hidden] { display: none; }
+
+/* Forecast suggestions in the trip planner */
+.plan-packing-body .pack-forecast-note { margin: 6px 0 0; }
+.pack-forecast-note:empty { display: none; }
+.pack-forecast-note + .pack-subhead { margin-top: 12px; }
+.plan-packing-body > .text-button { padding-top: 9px; }

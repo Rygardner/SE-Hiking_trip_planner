@@ -64,9 +64,31 @@
           <span class="weather-temp" id="weather-temp">--°</span>
         </section>
 
-        <section class="gear-panel" id="gear-panel">
-          <div class="section-heading"><span class="field-label">PACK FOR THE DAY</span><span class="tiny-mark">01—04</span></div>
-          <ul class="gear-list" id="gear-list"><li>Water &amp; a good pair of shoes</li><li>Weather tips appear with your forecast</li></ul>
+        <section class="gear-panel" id="gear-panel" data-pack-host="sidebar">
+          <div class="section-heading"><span class="field-label">PACK FOR THE DAY</span><span class="tiny-mark" id="pack-progress" data-pack="progress" aria-live="polite">0/0 PACKED</span></div>
+          <p class="pack-trip" id="pack-trip" data-pack="trip"></p>
+          <p class="pack-subhead">FORECAST SUGGESTIONS · SELECT TO ADD</p>
+          <ul class="gear-list" id="gear-list" data-pack="suggestions" aria-label="Gear suggested by the forecast. Select one to add it to your checklist."></ul>
+          <button class="text-button pack-add-all" id="pack-add-suggestions" data-pack="add-all" type="button">＋ Add all suggestions</button>
+          <p class="pack-subhead">MY CHECKLIST</p>
+          <ul class="pack-list" id="pack-list" data-pack="list" aria-label="Your packing checklist"></ul>
+          <form class="pack-row" id="pack-add-form" data-pack="add">
+            <input id="pack-item-input" data-pack="input" class="input-field" type="text" maxlength="60" placeholder="Add your own gear" aria-label="Add your own gear" autocomplete="off" />
+            <button class="ghost-button" type="submit">Add</button>
+          </form>
+          <div class="pack-lists">
+            <label class="field-label" for="pack-saved-select">SAVED LISTS</label>
+            <div class="pack-row">
+              <select id="pack-saved-select" data-pack="select" class="input-field"></select>
+              <button class="ghost-button" type="button" id="pack-load" data-pack="load">Load</button>
+              <button class="pack-remove" type="button" id="pack-delete-list" data-pack="delete" aria-label="Delete the selected saved list" title="Delete saved list">×</button>
+            </div>
+            <form class="pack-row" id="pack-save-form" data-pack="save">
+              <input id="pack-list-name" data-pack="name" class="input-field" type="text" maxlength="40" placeholder="Name this list" aria-label="Name for this packing list" autocomplete="off" />
+              <button class="ghost-button" type="submit">Save list</button>
+            </form>
+          </div>
+          <button class="text-button" id="pack-reset" data-pack="reset" type="button">Uncheck everything</button>
         </section>
 
         <section class="cost-panel">
@@ -145,6 +167,31 @@
         <label class="field-group"><span class="field-label">START DATE</span><input id="plan-start" class="input-field" type="date" /></label>
       </div>
       <div class="planner-summary" id="plan-summary"></div>
+      <details class="plan-packing" id="plan-packing" data-pack-host="planner">
+        <summary><span class="field-label">PACKING CHECKLIST</span><span class="tiny-mark" data-pack="progress">0/0 PACKED</span></summary>
+        <div class="plan-packing-body">
+          <p class="pack-subhead">FORECAST SUGGESTIONS FOR THIS TRIP · SELECT TO ADD</p>
+          <ul class="gear-list" data-pack="suggestions" aria-label="Gear suggested by this trip's forecast. Select one to add it to your checklist."></ul>
+          <button class="text-button pack-add-all" type="button" data-pack="add-all">＋ Add all suggestions</button>
+          <p class="plan-note pack-forecast-note" data-pack="forecast-note" aria-live="polite"></p>
+          <p class="pack-subhead">MY CHECKLIST</p>
+          <ul class="pack-list" data-pack="list" aria-label="Packing checklist for this trip"></ul>
+          <form class="pack-row" data-pack="add">
+            <input data-pack="input" class="input-field" type="text" maxlength="60" placeholder="Add gear for this trip" aria-label="Add gear for this trip" autocomplete="off" />
+            <button class="ghost-button" type="submit">Add</button>
+          </form>
+          <div class="pack-row">
+            <select data-pack="select" class="input-field" aria-label="Saved packing lists"></select>
+            <button class="ghost-button" type="button" data-pack="load">Load</button>
+            <button class="pack-remove" type="button" data-pack="delete" aria-label="Delete the selected saved list" title="Delete saved list">×</button>
+          </div>
+          <form class="pack-row" data-pack="save">
+            <input data-pack="name" class="input-field" type="text" maxlength="40" placeholder="Name this list" aria-label="Name for this packing list" autocomplete="off" />
+            <button class="ghost-button" type="submit">Save list</button>
+          </form>
+          <button class="text-button" type="button" data-pack="reset">Uncheck everything</button>
+        </div>
+      </details>
       <ol class="plan-days" id="plan-days"></ol>
       <footer class="planner-foot">
         <button class="ghost-button" type="button" id="plan-add-day">＋ Add day</button>
