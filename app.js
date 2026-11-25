@@ -674,19 +674,24 @@ function formatDuration(seconds) {
   return hours ? `${hours} hr ${minutes} min` : `${minutes} min`;
 }
 
+// Daily forecast for today plus the next 13 days, in the place's own time zone.
+function forecastUrl(place) {
+  const params = new URLSearchParams({
+    latitude: place.lat,
+    longitude: place.lon,
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset',
+    temperature_unit: 'fahrenheit',
+    wind_speed_unit: 'mph',
+    timezone: 'auto',
+    forecast_days: '14',
+  });
+  return `https://api.open-meteo.com/v1/forecast?${params}`;
+}
+
 async function loadWeather(place) {
   elements.weatherSummary.textContent = 'Checking forecast…';
   try {
-    const params = new URLSearchParams({
-      latitude: place.lat,
-      longitude: place.lon,
-      daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset',
-      temperature_unit: 'fahrenheit',
-      wind_speed_unit: 'mph',
-      timezone: 'auto',
-      forecast_days: '14',
-    });
-    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+    const response = await fetch(forecastUrl(place));
     if (!response.ok) throw new Error(`Forecast returned ${response.status}`);
     const data = await response.json();
     if (place !== currentPlace) return;
@@ -749,7 +754,8 @@ function describeWeather(code) {
   return { label: 'Mixed conditions', icon: '◌' };
 }
 
-function renderGear(weather) {
+// Four suggestions for a day's weather; without a forecast, the basics.
+function gearFor(weather) {
   const gear = ['Water & snacks', 'Offline map', 'Sun protection', 'First-aid kit'];
   if (weather) {
     if (weather.low < 45) gear[0] = 'Warm layers';
@@ -759,7 +765,376 @@ function renderGear(weather) {
     if ([95, 96, 99].includes(weather.code)) gear[3] = 'Check storm alerts';
     else if (weather.low < 35) gear[3] = 'Gloves & warm hat';
   }
-  elements.gearList.innerHTML = gear.map(item => `<li>${escapeHtml(item)}</li>`).join('');
+  return gear;
+}
+
+function renderGear(weather) {
+  suggestedGear = gearFor(weather);
+  renderPacking();
+}
+
+// ─── Packing checklist ──────────────────────────────────────────────
+// Each trip plan carries one checklist in plan.packing.items. Your own gear and forecast suggestions you
+// pick go into that same list. It's saved to the trip log with the plan and comes back when you reopen the trip.
+// Named lists (reusable kits) are shared across trips in PACKING_LISTS_KEY and keep only item names,
+// so a loaded list always starts unchecked.
+// The checklist shows in the sidebar and in the trip planner; both are marked with data-pack-host
+// and their parts with data-pack="…", so one set of handlers drives both.
+// Forecast suggestions differ: the sidebar's follow the searched place and hike date, while the planner's
+// come from the forecast for each trip day's destination on that day's date.
+const PACKING_LISTS_KEY = 'wilderpath:packing-lists';
+const PACK_ITEM_MAX = 60;
+const PACK_LIST_NAME_MAX = 40;
+const PACK_ITEMS_LIMIT = 100;
+const PACK_LISTS_LIMIT = 20;
+let suggestedGear = [];
+const packHosts = [...document.querySelectorAll('[data-pack-host]')];
+
+const cleanText = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+const cleanItemName = value => cleanText(value, PACK_ITEM_MAX);
+const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+const emptyPacking = () => ({ items: [] });
+
+// Drops blanks and case-insensitive repeats, keeping the first.
+function uniqueNames(names) {
+  const unique = [];
+  for (const name of names.map(cleanItemName)) if (name && !unique.some(other => sameName(other, name))) unique.push(name);
+  return unique;
+}
+
+// Plans come from storage and old trip logs, so tidy whatever is there.
+function cleanPacking(stored) {
+  if (!stored || typeof stored !== 'object') return emptyPacking();
+  const storedItems = Array.isArray(stored.items) ? stored.items.filter(item => item && typeof item === 'object') : [];
+  const usedIds = new Set();
+  const items = uniqueNames(storedItems.map(item => item.name)).map(name => {
+    const item = storedItems.find(candidate => sameName(cleanItemName(candidate.name), name));
+    // Ids find the item a checkbox belongs to, so a repeated or missing one gets a new id.
+    const id = typeof item.id === 'string' && item.id && !usedIds.has(item.id) ? item.id : newId();
+    usedIds.add(id);
+    return { id, name, checked: item.checked === true };
+  });
+  return { items: items.slice(0, PACK_ITEMS_LIMIT) };
+}
+
+function readPackingLists() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PACKING_LISTS_KEY));
+    if (!Array.isArray(stored)) return [];
+    return stored
+      .filter(list => list && typeof list === 'object' && cleanText(list.name, PACK_LIST_NAME_MAX) && Array.isArray(list.items))
+      .map(list => ({ id: typeof list.id === 'string' && list.id ? list.id : newId(), name: cleanText(list.name, PACK_LIST_NAME_MAX), items: uniqueNames(list.items).slice(0, PACK_ITEMS_LIMIT), savedAt: list.savedAt || null }))
+      .slice(0, PACK_LISTS_LIMIT);
+  } catch { return []; }
+}
+
+function savePackingLists(lists) {
+  try { localStorage.setItem(PACKING_LISTS_KEY, JSON.stringify(lists)); return true; }
+  catch { showToast('Could not save packing lists in this browser.'); return false; }
+}
+
+// The checklist of the trip being planned. Without a plan it's empty; editing starts a plan.
+function tripPacking() {
+  return plan?.packing || emptyPacking();
+}
+
+// A plan started from the checklist gets one day with no destination, so packing never puts a stop on the map.
+function ensurePackingPlan() {
+  if (!plan) plan = { ...newPlan({ withDay: false }), days: [newDay(null)] };
+  plan.packing ||= emptyPacking();
+  return plan.packing;
+}
+
+function editPacking() {
+  return ensurePackingPlan();
+}
+
+function myItemNamed(name, packing = tripPacking()) {
+  return packing.items.find(item => sameName(item.name, name));
+}
+
+function hostSuggestions(host) {
+  return host.dataset.packHost === 'planner' ? planSuggestedGear : suggestedGear;
+}
+
+// Forecast suggestions are buttons: pick one to put it on the checklist, pick it again to take it off.
+function renderSuggestions(host, packing) {
+  const list = packPart(host, 'suggestions');
+  if (!list) return;
+  const gear = hostSuggestions(host);
+  list.innerHTML = gear.map(name => {
+    const added = Boolean(myItemNamed(name, packing));
+    const title = added ? 'On your checklist. Select to remove it.' : 'Add to your checklist';
+    return `<li><button class="suggestion${added ? ' is-added' : ''}" type="button" data-suggestion="${escapeHtml(name)}" aria-pressed="${added}" title="${title}">${escapeHtml(name)}</button></li>`;
+  }).join('');
+  packPart(host, 'add-all').hidden = !gear.some(name => !myItemNamed(name, packing));
+  const note = packPart(host, 'forecast-note');
+  if (note) note.textContent = planForecastNote;
+}
+
+// ─── Forecast suggestions for the trip plan ─────────────────────────
+const FORECAST_CACHE_MS = 30 * 60 * 1000;
+const forecastCache = new Map(); // "lat,lon" → { at, promise }
+let planSuggestedGear = gearFor(null);
+let planForecastNote = '';
+let planForecastKey = '';
+
+// One request per destination, shared by its days and reused for a while.
+function fetchForecast(place) {
+  const key = `${place.lat},${place.lon}`;
+  const cached = forecastCache.get(key);
+  if (cached && Date.now() - cached.at < FORECAST_CACHE_MS) return cached.promise;
+  const promise = fetch(forecastUrl(place)).then(response => {
+    if (!response.ok) throw new Error(`Forecast returned ${response.status}`);
+    return response.json();
+  });
+  forecastCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => forecastCache.delete(key));
+  return promise;
+}
+
+function weatherOn(data, date) {
+  const index = data?.daily?.time?.indexOf(date) ?? -1;
+  if (index < 0) return null;
+  const daily = data.daily;
+  return {
+    code: daily.weather_code[index],
+    high: Math.round(daily.temperature_2m_max[index]),
+    low: Math.round(daily.temperature_2m_min[index]),
+    rain: daily.precipitation_probability_max[index] ?? 0,
+    wind: Math.round(daily.wind_speed_10m_max[index] ?? 0),
+  };
+}
+
+function planDayIsoDate(target, index) {
+  if (!target.startDate) return '';
+  const date = new Date(`${target.startDate}T12:00`);
+  date.setDate(date.getDate() + index);
+  return date.toLocaleDateString('en-CA');
+}
+
+const dayList = days => (days.length === 1 ? `Day ${days[0]}` : `Days ${days.slice(0, -1).join(', ')} and ${days.at(-1)}`);
+
+function setPlanForecast(gear, note) {
+  planSuggestedGear = uniqueNames(gear);
+  planForecastNote = note;
+  renderPacking();
+}
+
+// Looks up each trip day's weather and merges the suggestions, so a cold day and a rainy day
+// together suggest both warm layers and a rain shell. Only refetches when destinations or dates change.
+function refreshPlanForecast() {
+  if (!plan) return;
+  const targets = plan.days
+    .map((day, index) => ({ day: index + 1, place: day.destination, date: planDayIsoDate(plan, index) }))
+    .filter(target => target.place);
+  const key = JSON.stringify([plan.startDate, targets.map(target => [target.place.lat, target.place.lon, target.date])]);
+  if (key === planForecastKey) return;
+  planForecastKey = key;
+  if (!targets.length) return setPlanForecast(gearFor(null), 'Add a destination to get forecast suggestions for this trip. Until then, these are the basics.');
+  if (!plan.startDate) return setPlanForecast(gearFor(null), 'Set a start date to get forecast suggestions for this trip. Until then, these are the basics.');
+  setPlanForecast(planSuggestedGear, 'Checking the forecast for your trip…');
+  Promise.all(targets.map(target => fetchForecast(target.place)
+    .then(data => ({ ...target, weather: weatherOn(data, target.date) }))
+    .catch(error => { console.error('Trip forecast failed:', error); return { ...target, weather: null, failed: true }; })))
+    .then(results => {
+      if (key !== planForecastKey) return; // the trip changed while we were waiting
+      const today = new Date().toLocaleDateString('en-CA');
+      const covered = results.filter(result => result.weather);
+      const failed = results.filter(result => result.failed).map(result => result.day);
+      const missing = results.filter(result => !result.weather && !result.failed);
+      const past = missing.filter(result => result.date < today).map(result => result.day);
+      const later = missing.filter(result => result.date >= today).map(result => result.day);
+      const notes = [];
+      if (covered.length) {
+        const places = [...new Set(covered.map(result => result.place.shortName))];
+        notes.push(`From the forecast for ${dayList(covered.map(result => result.day))} (${places.join(', ')}).`);
+      }
+      if (past.length) notes.push(`${dayList(past)} ${past.length === 1 ? 'has' : 'have'} already passed.`);
+      if (later.length) notes.push(`No forecast yet for ${dayList(later)}: forecasts cover the next 14 days.`);
+      if (failed.length) notes.push(`The forecast for ${dayList(failed)} is unavailable right now.`);
+      if (!covered.length) notes.push('These are the basics until a forecast is available.');
+      setPlanForecast(covered.length ? covered.flatMap(result => gearFor(result.weather)) : gearFor(null), notes.join(' '));
+    });
+}
+
+function packCounts(packing = tripPacking()) {
+  return { total: packing.items.length, packed: packing.items.filter(item => item.checked).length };
+}
+
+function packProgressText({ total, packed }) {
+  return total > 0 && packed === total ? 'ALL PACKED ✓' : `${packed}/${total} PACKED`;
+}
+
+function packPart(host, part) {
+  return host.querySelector(`[data-pack="${part}"]`);
+}
+
+function packItemsMarkup(packing) {
+  return packing.items.map(item => `
+    <li${item.checked ? ' class="is-packed"' : ''}>
+      <label class="pack-check"><input type="checkbox" data-pack-id="${escapeHtml(item.id)}"${item.checked ? ' checked' : ''} /><span>${escapeHtml(item.name)}</span></label>
+      <button class="pack-remove" type="button" data-remove-pack="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.name)} from your checklist">×</button>
+    </li>`).join('') || '<li class="pack-empty">Pick forecast suggestions or add your own gear.</li>';
+}
+
+function savedListsMarkup(lists) {
+  if (!lists.length) return '<option value="">No saved lists yet</option>';
+  return `<option value="">Choose a saved list (${lists.length})</option>`
+    + lists.map(list => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.name)} · ${list.items.length} ${list.items.length === 1 ? 'item' : 'items'}</option>`).join('');
+}
+
+function renderSavedListPicker(host, lists, selectedId) {
+  const select = packPart(host, 'select');
+  select.innerHTML = savedListsMarkup(lists);
+  if (lists.some(list => list.id === selectedId)) select.value = selectedId;
+  select.disabled = !lists.length;
+  packPart(host, 'load').disabled = !select.value;
+  packPart(host, 'delete').disabled = !select.value;
+}
+
+// Only lists, counts and pickers are redrawn; the text boxes are left alone so typing isn't lost.
+function renderPacking({ selectList } = {}) {
+  const packing = tripPacking();
+  const lists = readPackingLists();
+  const tripName = plan ? (plan.name.trim() || defaultPlanName(plan)) : '';
+  for (const host of packHosts) {
+    const counts = packCounts(packing);
+    const progress = packPart(host, 'progress');
+    progress.textContent = packProgressText(counts);
+    progress.classList.toggle('all-packed', counts.total > 0 && counts.packed === counts.total);
+    packPart(host, 'list').innerHTML = packItemsMarkup(packing);
+    const select = packPart(host, 'select');
+    renderSavedListPicker(host, lists, selectList ?? select.value);
+    const trip = packPart(host, 'trip');
+    if (trip) trip.textContent = tripName ? `Packing for ${tripName}` : 'Your gear is saved with your trip plan.';
+    renderSuggestions(host, packing);
+  }
+}
+
+function persistPacking() {
+  persistPlan(); // saves the plan and redraws the planner and the checklist
+}
+
+function addPackItem(value) {
+  const name = cleanItemName(value);
+  if (!name) return false;
+  if (myItemNamed(name)) { notify(`${name} is already on your list.`); return false; }
+  const packing = editPacking();
+  if (packing.items.length >= PACK_ITEMS_LIMIT) { notify(`Your list is full (${PACK_ITEMS_LIMIT} items).`); return false; }
+  packing.items.push({ id: newId(), name, checked: false });
+  persistPacking();
+  return true;
+}
+
+function removePackItem(id) {
+  const packing = editPacking();
+  packing.items = packing.items.filter(item => item.id !== id);
+  persistPacking();
+}
+
+function setPackItemChecked(id, checked) {
+  const item = editPacking().items.find(candidate => candidate.id === id);
+  if (!item) return;
+  item.checked = checked;
+  persistPacking();
+}
+
+function toggleSuggestion(name) {
+  const mine = myItemNamed(name);
+  if (mine) {
+    removePackItem(mine.id);
+    notify(`Removed ${name} from your checklist.`);
+  } else if (addPackItem(name)) {
+    notify(`Added ${name} to your checklist.`);
+  }
+}
+
+function addAllSuggestions(gear) {
+  const missing = gear.filter(name => !myItemNamed(name));
+  if (!missing.length) return;
+  const packing = editPacking();
+  const room = PACK_ITEMS_LIMIT - packing.items.length;
+  missing.slice(0, room).forEach(name => packing.items.push({ id: newId(), name, checked: false }));
+  persistPacking();
+  notify(room < missing.length ? `Your list is full (${PACK_ITEMS_LIMIT} items).` : `Added ${missing.length} forecast ${missing.length === 1 ? 'suggestion' : 'suggestions'} to your checklist.`);
+}
+
+function uncheckAllGear() {
+  if (!tripPacking().items.length) return; // nothing to clear, and no reason to start a plan
+  editPacking().items.forEach(item => { item.checked = false; });
+  persistPacking();
+}
+
+// Saving under a name you've used before updates that list.
+function savePackingList(nameValue, host) {
+  const packing = tripPacking();
+  if (!packing.items.length) return notify('Add some gear before saving a list.');
+  const name = cleanText(nameValue, PACK_LIST_NAME_MAX) || (currentPlace ? `${currentPlace.shortName} kit` : 'My packing list');
+  const lists = readPackingLists();
+  const existing = lists.find(list => sameName(list.name, name));
+  const saved = { id: existing?.id || newId(), name, items: packing.items.map(item => item.name), savedAt: new Date().toISOString() };
+  const next = [saved, ...lists.filter(list => list !== existing)];
+  if (next.length > PACK_LISTS_LIMIT) return notify(`You can keep up to ${PACK_LISTS_LIMIT} lists. Delete one to save another.`);
+  if (!savePackingLists(next)) return;
+  if (host) packPart(host, 'name').value = name;
+  renderPacking({ selectList: saved.id });
+  notify(existing ? `Updated “${name}”.` : `Saved “${name}” to your lists.`);
+}
+
+// Loading replaces this trip's gear with the list's items, all unchecked.
+function loadPackingList(id, host) {
+  const list = readPackingLists().find(candidate => candidate.id === id);
+  if (!list) return notify('Choose a saved list first.');
+  const current = tripPacking().items;
+  const loses = current.some(item => item.checked || !list.items.some(other => sameName(other, item.name)));
+  if (loses && !confirm(`Replace this trip's gear with “${list.name}”? Checkmarks are cleared and items not on that list are removed.`)) return;
+  ensurePackingPlan();
+  plan.packing = { items: list.items.map(name => ({ id: newId(), name, checked: false })) };
+  persistPacking();
+  if (host) packPart(host, 'name').value = list.name;
+  notify(`Loaded “${list.name}”.`);
+}
+
+function deletePackingList(id) {
+  const lists = readPackingLists();
+  const list = lists.find(candidate => candidate.id === id);
+  if (!list || !confirm(`Delete the saved list “${list.name}”? Your trip's checklist is kept.`)) return;
+  if (!savePackingLists(lists.filter(candidate => candidate !== list))) return;
+  renderPacking({ selectList: '' });
+  notify(`Deleted “${list.name}”.`);
+}
+
+for (const host of packHosts) {
+  host.addEventListener('change', event => {
+    const { packId } = event.target.dataset || {};
+    if (packId !== undefined) return setPackItemChecked(packId, event.target.checked);
+    if (event.target.dataset?.pack === 'select') renderSavedListPicker(host, readPackingLists(), event.target.value);
+  });
+  host.addEventListener('click', event => {
+    const removeId = event.target.closest('[data-remove-pack]')?.dataset.removePack;
+    if (removeId !== undefined) return removePackItem(removeId);
+    const suggestionName = event.target.closest('[data-suggestion]')?.dataset.suggestion;
+    if (suggestionName !== undefined) return toggleSuggestion(suggestionName);
+    const part = event.target.closest('button[data-pack]')?.dataset.pack;
+    if (part === 'add-all') return addAllSuggestions(hostSuggestions(host));
+    const listId = packPart(host, 'select').value;
+    if (part === 'load') loadPackingList(listId, host);
+    if (part === 'delete') deletePackingList(listId);
+    if (part === 'reset') {
+      uncheckAllGear();
+      notify('Checklist cleared.');
+    }
+  });
+  host.addEventListener('submit', event => {
+    const part = event.target.dataset?.pack;
+    if (part !== 'add' && part !== 'save') return;
+    event.preventDefault();
+    if (part === 'save') return savePackingList(packPart(host, 'name').value, host);
+    const input = packPart(host, 'input');
+    if (addPackItem(input.value)) input.value = '';
+    input.focus();
+  }, true); // capture, so it also sees submit events that don't bubble
 }
 
 function shortName(displayName) {
@@ -880,6 +1255,8 @@ function tripLogMeta(item) {
   const days = `${item.days.length} ${item.days.length === 1 ? 'day' : 'days'}`;
   const parts = [item.startDate || 'Date not set', days, `${totals.trails} trails`, `${totals.miles.toFixed(1)} mi`];
   if (totals.trails) parts.push(completedLabel(planCompletedCount(item), totals.trails));
+  const gear = packCounts(cleanPacking(item.packing));
+  if (gear.total) parts.push(`${gear.packed}/${gear.total} packed`);
   return parts.join(' · ');
 }
 
@@ -1197,7 +1574,7 @@ let planStatusTimer;
 function readPlan() {
   try {
     const stored = JSON.parse(localStorage.getItem(PLAN_KEY));
-    return Array.isArray(stored?.days) ? stored : null;
+    return Array.isArray(stored?.days) ? { ...stored, packing: cleanPacking(stored.packing) } : null;
   } catch { return null; }
 }
 
@@ -1214,7 +1591,7 @@ function newDay(destination) {
 }
 
 function newPlan({ withDay = true } = {}) {
-  return { id: newId(), name: '', startDate: elements.tripDate.value, days: withDay ? [newDay(currentPlace)] : [] };
+  return { id: newId(), name: '', startDate: elements.tripDate.value, days: withDay ? [newDay(currentPlace)] : [], packing: emptyPacking() };
 }
 
 function ensurePlan(options) {
@@ -1223,7 +1600,8 @@ function ensurePlan(options) {
 }
 
 function setPlan(next) {
-  plan = next;
+  // Trips saved before checklists belonged to plans have none.
+  plan = next && { ...next, packing: cleanPacking(next.packing) };
   persistPlan();
 }
 
@@ -1240,6 +1618,7 @@ function refreshPlanViews() {
   elements.planBadge.textContent = trailCount;
   if (elements.planner.open) renderPlanner();
   if (sheetTrail) renderTrailSheet();
+  renderPacking();
 }
 
 // The planner is a modal, so the map toast would be hidden behind it.
@@ -1365,9 +1744,11 @@ function renderPlanner() {
   const legs = roadLegs(plan);
   elements.planDays.innerHTML = plan.days.map((day, index) => dayMarkup(day, index, legs.find(leg => leg.toDay === index))).join('')
     || '<li class="plan-hint">No days yet. Add one to get started.</li>';
+  refreshPlanForecast();
 }
 
 function openPlanner() {
+  planForecastKey = ''; // check the trip's forecast again each time the planner opens
   ensurePlan();
   persistPlan();
   renderPlanner();
@@ -1505,6 +1886,7 @@ elements.plannerClose.addEventListener('click', () => elements.planner.close());
 elements.planName.addEventListener('input', () => {
   plan.name = elements.planName.value;
   localStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+  renderPacking(); // the sidebar says which trip you're packing for
 });
 elements.planName.addEventListener('change', persistPlan);
 elements.planStart.addEventListener('change', () => {
@@ -1517,7 +1899,7 @@ elements.planAddDay.addEventListener('click', () => {
   elements.planDays.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 });
 elements.planNew.addEventListener('click', () => {
-  const hasContent = plan.days.some(day => day.destination || day.trails.length);
+  const hasContent = plan.days.some(day => day.destination || day.trails.length) || tripPacking().items.length > 0;
   if (hasContent && !confirm('Clear this plan and start a new one? Trips already saved to your log are kept.')) return;
   setPlan(newPlan());
   notify('Started a new plan.');
@@ -1659,6 +2041,7 @@ elements.startTime.addEventListener('change', () => { if (currentPlace) loadWeat
 elements.hikeHours.addEventListener('change', () => { if (currentPlace) loadWeather(currentPlace); });
 
 initializeDate();
+renderGear(null);
 renderFilters();
 readFuelInputs();
 renderSaved();
