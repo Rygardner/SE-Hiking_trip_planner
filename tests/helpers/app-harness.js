@@ -28,21 +28,33 @@ function createFakeLeaflet() {
     }
     addTo(target) { target.add?.(this); return this; }
     on(event, handler) { this.handlers[event] = handler; return this; }
-    fire(event) { this.handlers[event]?.(); }
+    fire(event, data = {}) { this.handlers[event]?.({ target: this, ...data }); }
   }
   // highlightSelection tells markers from lines by checking for setIcon, so keep them separate.
   class Marker extends Layer {
     setIcon(icon) { this.options.icon = icon; }
     setZIndexOffset(offset) { this.options.zIndexOffset = offset; }
+    getLatLng() { return { lat: this.latlngs[0], lng: this.latlngs[1] }; }
+    setLatLng([lat, lng]) { this.latlngs = [lat, lng]; return this; }
   }
   class Path extends Layer {
     setStyle(style) { this.style = style; }
     bringToFront() {}
   }
-  const map = { setView: () => map, flyTo: (center, zoom) => flyTo.push({ center, zoom }), getZoom: () => 8, add() {} };
+  const mapHandlers = {};
+  const map = {
+    setView: () => map,
+    flyTo: (center, zoom) => flyTo.push({ center, zoom }),
+    getZoom: () => 8,
+    add() {},
+    on(event, handler) { mapHandlers[event] = handler; return map; },
+    // Simulates a map click at [lat, lng].
+    click([lat, lng]) { mapHandlers.click?.({ latlng: { lat, lng } }); },
+  };
   return {
     groups,
     flyTo,
+    theMap: map,
     map: () => map,
     tileLayer: () => new Layer('tile'),
     control: { zoom: () => ({ addTo() {} }) },

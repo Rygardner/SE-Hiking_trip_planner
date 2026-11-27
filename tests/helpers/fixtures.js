@@ -38,10 +38,27 @@ function forecastFor(date, { code = 0, high = 70, low = 50, rain = 10, wind = 5 
   };
 }
 
+// Hourly forecast for whole days starting on `date`, in the test machine's own time zone so "now" lines up.
+function hourlyFor(date, { days = 1, code = 0, temp = 60, rain = 20, wind = 7 } = {}) {
+  const time = [];
+  const start = new Date(`${date}T00:00Z`);
+  for (let hour = 0; hour < days * 24; hour += 1) time.push(new Date(start.getTime() + hour * 3600000).toISOString().slice(0, 16));
+  return {
+    utc_offset_seconds: -new Date().getTimezoneOffset() * 60,
+    hourly: {
+      time,
+      weather_code: time.map(() => code),
+      temperature_2m: time.map((_, index) => temp + index % 24),
+      precipitation_probability: time.map(() => rain),
+      wind_speed_10m: time.map(() => wind),
+    },
+  };
+}
+
 // Returns one made-up elevation (meters) per requested point.
 function elevationReply({ url }) {
   const count = new URL(url).searchParams.get('latitude').split(',').length;
   return { elevation: Array.from({ length: count }, (_, index) => 1800 + index * 5) };
 }
 
-module.exports = { GOLDEN, BOULDER, overpassData, geocodeResults, forecastFor, elevationReply };
+module.exports = { GOLDEN, BOULDER, overpassData, geocodeResults, forecastFor, hourlyFor, elevationReply };

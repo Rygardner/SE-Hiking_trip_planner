@@ -339,3 +339,49 @@ h1 em { color: var(--green); font-weight: 500; }
 .pack-forecast-note:empty { display: none; }
 .pack-forecast-note + .pack-subhead { margin-top: 12px; }
 .plan-packing-body > .text-button { padding-top: 9px; }
+
+/* Hour-by-hour forecast for the hike */
+.hourly-panel { padding: 13px 0 12px; border-bottom: 1px solid var(--line); }
+.hourly-panel .section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 7px; }
+.hourly-panel .tiny-mark { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hourly-note { margin: 0 0 7px; color: #788575; font-size: 9px; line-height: 1.4; }
+.hourly-table { width: 100%; border-collapse: collapse; font-size: 10px; font-variant-numeric: tabular-nums; }
+.hourly-table th, .hourly-table td { padding: 5px 4px; border-top: 1px solid var(--line); text-align: left; font-weight: 400; white-space: nowrap; }
+.hourly-table thead th { padding-top: 0; border-top: 0; color: #8c9588; font-size: 8px; text-transform: uppercase; }
+.hourly-table tbody th { color: var(--ink); font-family: var(--mono); font-size: 9px; }
+.hourly-table td:nth-child(2) { width: 100%; white-space: normal; }
+.hourly-icon { display: inline-block; width: 15px; color: var(--green); }
+.hourly-table tr.unavailable td { color: #9aa196; font-style: italic; }
+
+/* Start and destination pins */
+.route-panel { padding: 14px 0 13px; border-bottom: 1px solid var(--line); }
+.route-panel .section-heading { display: flex; justify-content: space-between; align-items: baseline; }
+.route-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.route-row + .route-row { border-top: 1px dashed var(--line); }
+.route-set:disabled { opacity: .45; cursor: not-allowed; }
+.route-badge { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: white; font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.route-badge.start, .route-pin.start b { background: var(--green); }
+.route-badge.end, .route-pin.end b { background: var(--coral); }
+.route-badge.stop, .route-pin.stop b { background: #6d7a6e; }
+.route-list { margin: 0; padding: 0; list-style: none; }
+.route-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.route-label { color: #748172; font-size: 8px; text-transform: uppercase; }
+.route-value { overflow: hidden; color: var(--ink); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.route-value.unset { color: #9aa196; font-weight: 400; }
+.route-set { height: 28px; padding: 0 9px; font-size: 10px; }
+.route-set[aria-pressed="true"] { border-color: var(--green); background: var(--lime); color: var(--ink); }
+.route-hint { margin: 6px 0 9px; color: #788575; font-size: 9px; line-height: 1.4; }
+.route-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.route-directions { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+.route-directions[aria-disabled="true"] { opacity: .45; cursor: not-allowed; pointer-events: none; }
+.route-actions .text-button { padding: 0; }
+#map.placing-pin, #map.placing-pin .leaflet-interactive { cursor: crosshair; }
+.route-pin { display: flex; align-items: center; gap: 4px; padding: 2px 8px 2px 2px; border: 2px solid white; border-radius: 14px; background: white; color: var(--ink); font-size: 10px; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 7px #183c3266; transform: translate(-50%, calc(-100% - 6px)); cursor: grab; position: relative; }
+.route-pin::after { content: ''; position: absolute; left: 50%; bottom: -8px; border: 6px solid transparent; border-top-color: white; transform: translateX(-50%); }
+.route-pin b { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; color: white; font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.leaflet-dragging .route-pin { cursor: grabbing; }
+.plan-route { margin: 0; padding: 9px 22px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.plan-route[hidden] { display: none; }
+.plan-route a { color: var(--green); font-size: 10px; font-weight: 600; text-decoration: none; }
+.plan-route a:hover { text-decoration: underline; }
+@media (max-width: 800px) { .plan-route { padding: 9px 14px; } }

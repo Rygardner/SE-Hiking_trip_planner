@@ -218,7 +218,7 @@ describe('trip planner', () => {
     app.run('setPlan')(app.run('newPlan')({ withDay: false }));
     app.run('plan').days.push({ destination: null, trails: [] });
     app.run('savePlanToLog')();
-    assert.equal(app.$('#toast').textContent, 'Add a destination or trail before saving.');
+    assert.equal(app.$('#toast').textContent, 'Add a destination, trail or map pin before saving.');
     assert.equal(app.window.localStorage.getItem(TRIPS_KEY), null);
   });
 

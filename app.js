@@ -31,6 +31,18 @@ const elements = {
   weatherSummary: document.querySelector('#weather-summary'),
   weatherTemp: document.querySelector('#weather-temp'),
   weatherIcon: document.querySelector('#weather-icon'),
+  hourlyWhere: document.querySelector('#hourly-where'),
+  hourlyNote: document.querySelector('#hourly-note'),
+  hourlyTable: document.querySelector('#hourly-table'),
+  hourlyRows: document.querySelector('#hourly-rows'),
+  routePanel: document.querySelector('#route-panel'),
+  routeList: document.querySelector('#route-list'),
+  routeToggle: document.querySelector('#route-toggle'),
+  routeHint: document.querySelector('#route-hint'),
+  routeDirections: document.querySelector('#route-directions'),
+  routeClearAll: document.querySelector('#route-clear-all'),
+  planRoute: document.querySelector('#plan-route'),
+  mapElement: document.querySelector('#map'),
   gearList: document.querySelector('#gear-list'),
   savedList: document.querySelector('#saved-list'),
   favoriteCount: document.querySelector('#favorite-count'),
@@ -62,12 +74,15 @@ const elements = {
 const layers = L.layerGroup().addTo(map);
 const planLayer = L.layerGroup().addTo(map);
 const highlightLayer = L.layerGroup().addTo(map);
+const routeLayer = L.layerGroup().addTo(map);
 let currentPlace = null;
 let userPosition = null;
 let currentItems = [];
 let selectedItemId = null;
 let savedTab = 'favorites';
 const SAVED_PREVIEW_LIMIT = 10;
+// Route pins per trip. Declared up here because the saved plan is read (and cleaned) before the pin code runs.
+const MAX_ROUTE_POINTS = 10; // Google Maps directions links take up to 9 stops between start and destination
 let showAllSaved = false;
 let toastTimer;
 
@@ -188,6 +203,7 @@ function focusItem(id, { fly = true } = {}) {
   highlightSelection();
   if (fly) map.flyTo(item.center, Math.max(map.getZoom(), 13), { duration: 0.55 });
   openTrailDetails(item);
+  refreshHourly();
 }
 
 const TRAIL_STYLE = { color: '#54774b', weight: 3, opacity: 0.72 };
@@ -408,10 +424,11 @@ function drawItems(items) {
     const completed = done.has(item.id);
     // Every trail gets a pin at its midpoint; mapped paths also get their line.
     const trailLayers = [L.marker(item.center, { icon: markerIcon(false, completed), title: item.name })];
-    if (item.lines.length) trailLayers.unshift(L.polyline(item.lines, { ...trailStyle(false, completed), lineCap: 'round' }));
+    // Lines don't pass clicks on to the map, so a click while placing a pin is handled once, here.
+    if (item.lines.length) trailLayers.unshift(L.polyline(item.lines, { ...trailStyle(false, completed), lineCap: 'round', bubblingMouseEvents: false }));
     for (const layer of trailLayers) {
       layer.featureId = item.id;
-      layer.on('click', () => focusItem(item.id, { fly: false }));
+      layer.on('click', event => (placingPins ? addRoutePoint(event?.latlng) : focusItem(item.id, { fly: false })));
       layer.addTo(layers);
     }
   }
@@ -674,12 +691,13 @@ function formatDuration(seconds) {
   return hours ? `${hours} hr ${minutes} min` : `${minutes} min`;
 }
 
-// Daily forecast for today plus the next 13 days, in the place's own time zone.
+// Daily and hourly forecast for today plus the next 13 days, in the place's own time zone.
 function forecastUrl(place) {
   const params = new URLSearchParams({
     latitude: place.lat,
     longitude: place.lon,
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset',
+    hourly: 'weather_code,temperature_2m,precipitation_probability,wind_speed_10m',
     temperature_unit: 'fahrenheit',
     wind_speed_unit: 'mph',
     timezone: 'auto',
@@ -690,11 +708,18 @@ function forecastUrl(place) {
 
 async function loadWeather(place) {
   elements.weatherSummary.textContent = 'Checking forecast…';
+  showHourlyMessage('Checking the hourly forecast…');
   try {
     const response = await fetch(forecastUrl(place));
     if (!response.ok) throw new Error(`Forecast returned ${response.status}`);
     const data = await response.json();
     if (place !== currentPlace) return;
+    placeForecast = { place, data };
+    // A problem with the hourly view mustn't take the daily forecast down with it.
+    try { refreshHourly(); } catch (error) {
+      console.error('Hourly forecast failed:', error);
+      showHourlyMessage(HOURLY_UNAVAILABLE);
+    }
     const date = elements.tripDate.value;
     const index = data.daily.time.indexOf(date);
     // Forecasts only cover today plus the next 13 days; don't fall back to another day's weather.
@@ -719,6 +744,9 @@ async function loadWeather(place) {
     renderGear({ code, high, low, rain, wind });
   } catch (error) {
     console.error('Weather lookup failed:', error);
+    if (place !== currentPlace) return;
+    placeForecast = { place, failed: true };
+    refreshHourly();
     elements.weatherSummary.textContent = 'Forecast unavailable';
     elements.weatherTemp.textContent = '--°';
     elements.daylightNote.textContent = 'Local daylight details unavailable.';
@@ -752,6 +780,127 @@ function describeWeather(code) {
   if ([71, 73, 75, 77, 85, 86].includes(code)) return { label: 'Snow likely', icon: '❄' };
   if ([95, 96, 99].includes(code)) return { label: 'Storm risk', icon: '⚡' };
   return { label: 'Mixed conditions', icon: '◌' };
+}
+
+// ─── Hourly forecast for the hike ───────────────────────────────────
+// Covers the hours from the start time through the finish, at the selected trail's start
+// (or the searched place when no trail is selected).
+let placeForecast = null; // { place, data } or { place, failed: true } for the searched place
+let hourlyKey = '';
+
+const HOURLY_UNAVAILABLE = 'Hourly forecast unavailable right now. Check your connection and try again.';
+
+// Adds minutes to a local date and time and returns "YYYY-MM-DDTHH:MM". UTC math keeps DST from shifting it.
+function addLocalMinutes(dateValue, timeValue, minutes) {
+  const [year, month, day] = dateValue.split('-').map(Number);
+  const [hour, minute] = timeValue.split(':').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, hour, minute + minutes)).toISOString().slice(0, 16);
+}
+
+// The current hour at the forecast's place, as "YYYY-MM-DDTHH".
+function placeHourNow(data) {
+  return new Date(Date.now() + (data?.utc_offset_seconds || 0) * 1000).toISOString().slice(0, 13);
+}
+
+// One row per hour the hike touches, from the start hour through the hour it finishes in.
+// Status is 'ok', 'passed' (before the current hour) or 'missing' (not in the forecast).
+function hourlyRows(data, date, startTime, hours, nowHour = placeHourNow(data)) {
+  if (!date || !startTime || !(hours > 0)) return [];
+  const startHour = `${startTime.slice(0, 2)}:00`;
+  const lastKey = addLocalMinutes(date, startTime, hours * 60).slice(0, 13);
+  const hourly = data?.hourly || {};
+  const indexes = new Map((hourly.time || []).map((time, index) => [time.slice(0, 13), index]));
+  const rows = [];
+  for (let step = 0; rows.length < 48; step += 1) {
+    const key = addLocalMinutes(date, startHour, step * 60).slice(0, 13);
+    if (key > lastKey) break;
+    const index = indexes.get(key);
+    const temp = index === undefined ? null : hourly.temperature_2m?.[index];
+    if (key < nowHour) rows.push({ time: key, status: 'passed' });
+    else if (temp === null || temp === undefined) rows.push({ time: key, status: 'missing' });
+    else {
+      rows.push({
+        time: key,
+        status: 'ok',
+        code: hourly.weather_code?.[index],
+        temp: Math.round(temp),
+        rain: hourly.precipitation_probability?.[index] ?? null,
+        wind: hourly.wind_speed_10m?.[index] == null ? null : Math.round(hourly.wind_speed_10m[index]),
+      });
+    }
+  }
+  return rows;
+}
+
+// "8 AM", or "Fri 1 AM" for hours that fall on the day after the hike date.
+function formatHour(key, date) {
+  const hour = Number(key.slice(11, 13));
+  const label = `${hour % 12 || 12} ${hour < 12 ? 'AM' : 'PM'}`;
+  if (key.slice(0, 10) === date) return label;
+  return `${new Date(`${key.slice(0, 10)}T12:00`).toLocaleDateString('en-US', { weekday: 'short' })} ${label}`;
+}
+
+function formatDayLabel(date) {
+  return new Date(`${date}T12:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function hourlyTarget() {
+  const trail = selectedItemId && currentItems.find(item => item.id === selectedItemId);
+  if (trail?.start) return { lat: trail.start[0], lon: trail.start[1], where: `${trail.trailhead ? 'TRAILHEAD' : 'START'} · ${trail.name.toUpperCase()}` };
+  return currentPlace && { lat: currentPlace.lat, lon: currentPlace.lon, where: currentPlace.shortName.toUpperCase(), place: currentPlace };
+}
+
+function showHourlyMessage(message) {
+  elements.hourlyNote.textContent = message;
+  elements.hourlyTable.hidden = true;
+  elements.hourlyRows.innerHTML = '';
+}
+
+function refreshHourly() {
+  const target = hourlyTarget();
+  elements.hourlyWhere.textContent = target?.where || '';
+  elements.hourlyWhere.title = target?.where || '';
+  if (!target) return showHourlyMessage('Search a place to see the hourly forecast for your hike.');
+  const key = JSON.stringify([target.lat, target.lon, elements.tripDate.value, elements.startTime.value, elements.hikeHours.value]);
+  hourlyKey = key;
+  if (target.place) {
+    // loadWeather calls back here once the place's forecast arrives.
+    if (placeForecast?.place !== target.place) return showHourlyMessage('Checking the hourly forecast…');
+    return placeForecast.failed ? showHourlyMessage(HOURLY_UNAVAILABLE) : renderHourly(placeForecast.data);
+  }
+  showHourlyMessage('Checking the hourly forecast…');
+  fetchForecast(target)
+    .then(data => { if (hourlyKey === key) renderHourly(data); })
+    .catch(error => {
+      console.error('Hourly forecast failed:', error);
+      if (hourlyKey === key) showHourlyMessage(HOURLY_UNAVAILABLE);
+    });
+}
+
+function renderHourly(data) {
+  const date = elements.tripDate.value;
+  const hours = Number(elements.hikeHours.value);
+  const rows = hourlyRows(data, date, elements.startTime.value, hours);
+  if (!rows.length) return showHourlyMessage('Pick a hike date and start time to see the hourly forecast.');
+  const passed = rows.filter(row => row.status === 'passed').length;
+  const missing = rows.filter(row => row.status === 'missing').length;
+  if (passed === rows.length) return showHourlyMessage('These hours have already passed. Pick a later start time or another day.');
+  if (passed + missing === rows.length) {
+    return showHourlyMessage(`No hourly forecast for ${formatDayLabel(date)} yet. Forecasts cover the next 14 days, so check back closer to your trip.`);
+  }
+  const notes = [];
+  if (passed) notes.push(`The first ${passed === 1 ? 'hour has' : `${passed} hours have`} already passed.`);
+  if (missing) notes.push(`No forecast yet for the last ${missing === 1 ? 'hour' : `${missing} hours`} of your hike.`);
+  elements.hourlyNote.textContent = notes.join(' ') || `Each hour of your ${hours}-hour hike, starting ${formatHour(rows[0].time, date)}.`;
+  elements.hourlyRows.innerHTML = rows.map(row => {
+    const time = `<th scope="row">${escapeHtml(formatHour(row.time, date))}</th>`;
+    if (row.status === 'passed') return `<tr class="unavailable">${time}<td colspan="4">Already passed</td></tr>`;
+    if (row.status === 'missing') return `<tr class="unavailable">${time}<td colspan="4">Forecast not available yet</td></tr>`;
+    const weather = describeWeather(row.code);
+    return `<tr>${time}<td><span class="hourly-icon" aria-hidden="true">${weather.icon}</span>${escapeHtml(weather.label)}</td>`
+      + `<td>${row.temp}°F</td><td>${row.rain === null ? '–' : `${row.rain}%`}</td><td>${row.wind === null ? '–' : `${row.wind} mph`}</td></tr>`;
+  }).join('');
+  elements.hourlyTable.hidden = false;
 }
 
 // Four suggestions for a day's weather; without a forecast, the basics.
@@ -1574,7 +1723,7 @@ let planStatusTimer;
 function readPlan() {
   try {
     const stored = JSON.parse(localStorage.getItem(PLAN_KEY));
-    return Array.isArray(stored?.days) ? { ...stored, packing: cleanPacking(stored.packing) } : null;
+    return Array.isArray(stored?.days) ? { ...stored, packing: cleanPacking(stored.packing), route: cleanRoute(stored.route) } : null;
   } catch { return null; }
 }
 
@@ -1591,7 +1740,7 @@ function newDay(destination) {
 }
 
 function newPlan({ withDay = true } = {}) {
-  return { id: newId(), name: '', startDate: elements.tripDate.value, days: withDay ? [newDay(currentPlace)] : [], packing: emptyPacking() };
+  return { id: newId(), name: '', startDate: elements.tripDate.value, days: withDay ? [newDay(currentPlace)] : [], packing: emptyPacking(), route: cleanRoute(null) };
 }
 
 function ensurePlan(options) {
@@ -1600,8 +1749,8 @@ function ensurePlan(options) {
 }
 
 function setPlan(next) {
-  // Trips saved before checklists belonged to plans have none.
-  plan = next && { ...next, packing: cleanPacking(next.packing) };
+  // Trips saved before checklists or map pins belonged to plans have none.
+  plan = next && { ...next, packing: cleanPacking(next.packing), route: cleanRoute(next.route) };
   persistPlan();
 }
 
@@ -1613,6 +1762,8 @@ function persistPlan() {
 
 function refreshPlanViews() {
   drawPlanStops();
+  drawRoutePins();
+  renderRoutePanel();
   const trailCount = plan ? plan.days.reduce((sum, day) => sum + day.trails.length, 0) : 0;
   elements.planBadge.hidden = !trailCount;
   elements.planBadge.textContent = trailCount;
@@ -1741,6 +1892,7 @@ function renderPlanner() {
   elements.planStart.value = plan.startDate || '';
   elements.planStart.min = elements.tripDate.min;
   renderPlanSummary();
+  renderPlanRoute();
   const legs = roadLegs(plan);
   elements.planDays.innerHTML = plan.days.map((day, index) => dayMarkup(day, index, legs.find(leg => leg.toDay === index))).join('')
     || '<li class="plan-hint">No days yet. Add one to get started.</li>';
@@ -1778,8 +1930,181 @@ function drawPlanStops() {
   }
 }
 
+// ─── Route pins ─────────────────────────────────────────────────────
+// Saved on the plan as plan.route = { points: [{ lat, lon, label }, …] }, in route order.
+// The first point is the start, the last is the destination and any between are stops.
+// Turn on "Add points on map", click the map once per point, drag a pin to move it.
+let placingPins = false;
+
+function cleanPoint(point) {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return null;
+  return { lat: point.lat, lon: point.lon, label: typeof point.label === 'string' ? point.label : '' };
+}
+
+// Older plans stored { start, end }; they become a two-point route.
+function cleanRoute(route) {
+  const points = Array.isArray(route?.points) ? route.points : [route?.start, route?.end];
+  return { points: points.map(cleanPoint).filter(Boolean).slice(0, MAX_ROUTE_POINTS) };
+}
+
+function routePoints() {
+  return plan?.route?.points || [];
+}
+
+function hasRoute(target = plan) {
+  return Boolean(target?.route?.points?.length);
+}
+
+function pointRole(index, count) {
+  if (index === 0) return { kind: 'start', name: 'Start' };
+  if (index === count - 1) return { kind: 'end', name: 'Destination' };
+  return { kind: 'stop', name: `Stop ${index}` };
+}
+
+const coordLabel = point => `${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}`;
+const pointLabel = point => point.label || coordLabel(point);
+const pointParam = point => `${point.lat},${point.lon}`;
+
+// Driving directions through every pin in order.
+function directionsUrl(points) {
+  if (!points || points.length < 2) return '';
+  const stops = points.slice(1, -1);
+  const waypoints = stops.length ? `&waypoints=${stops.map(pointParam).join('%7C')}` : '';
+  return `https://www.google.com/maps/dir/?api=1&origin=${pointParam(points[0])}&destination=${pointParam(points.at(-1))}${waypoints}&travelmode=driving`;
+}
+
+const toPoint = latlng => ({ lat: Number(latlng.lat.toFixed(5)), lon: Number((latlng.lng ?? latlng.lon).toFixed(5)), label: '' });
+
+function setPlacingPins(on) {
+  placingPins = on;
+  renderRoutePanel();
+}
+
+function addRoutePoint(latlng) {
+  if (!placingPins || !latlng) return;
+  ensurePlan();
+  const points = routePoints();
+  if (points.length >= MAX_ROUTE_POINTS) return setPlacingPins(false);
+  const point = toPoint(latlng);
+  plan.route = { points: [...points, point] };
+  if (plan.route.points.length >= MAX_ROUTE_POINTS) placingPins = false;
+  persistPlan();
+  labelRoutePoint(point);
+}
+
+function moveRoutePoint(index, latlng) {
+  const points = [...routePoints()];
+  if (!points[index]) return;
+  const point = toPoint(latlng);
+  points[index] = point;
+  plan.route = { points };
+  persistPlan();
+  labelRoutePoint(point);
+}
+
+function removeRoutePoint(index) {
+  if (!plan) return;
+  plan.route = { points: routePoints().filter((_, other) => other !== index) };
+  persistPlan();
+}
+
+// Names a pin after what's there (a street, a park) once it's dropped. Coordinates stand in until then.
+async function labelRoutePoint(point) {
+  try {
+    const params = new URLSearchParams({ lat: point.lat, lon: point.lon, format: 'jsonv2', zoom: '16' });
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, { headers: { 'Accept-Language': 'en' } });
+    if (!response.ok) return;
+    const result = await response.json();
+    const label = result?.name || (typeof result?.display_name === 'string' ? shortName(result.display_name) : '');
+    if (!label || !routePoints().includes(point)) return; // the pin moved or was removed meanwhile
+    point.label = label;
+    persistPlan();
+  } catch (error) {
+    console.error('Pin name lookup failed:', error);
+  }
+}
+
+function drawRoutePins() {
+  routeLayer.clearLayers();
+  const points = routePoints();
+  if (points.length > 1) {
+    L.polyline(points.map(point => [point.lat, point.lon]), { color: '#183c32', weight: 2, opacity: 0.7, dashArray: '4 6', interactive: false }).addTo(routeLayer);
+  }
+  points.forEach((point, index) => {
+    const { kind, name } = pointRole(index, points.length);
+    const icon = L.divIcon({ className: '', html: `<div class="route-pin ${kind}"><b>${index + 1}</b><span>${name}</span></div>`, iconSize: null });
+    L.marker([point.lat, point.lon], { icon, draggable: true, autoPan: true, title: `${name}: ${pointLabel(point)}. Drag to move.`, zIndexOffset: 1000 })
+      .on('dragend', event => moveRoutePoint(index, event.target.getLatLng()))
+      .addTo(routeLayer);
+  });
+}
+
+function routeHint(points) {
+  const full = points.length >= MAX_ROUTE_POINTS;
+  if (placingPins) {
+    const next = points.length ? 'the next stop' : 'your start';
+    return `Click the map to add ${next}. Keep clicking to add more, then press Done (or Esc).`;
+  }
+  if (full) return `That's the most a Google Maps link can take (${MAX_ROUTE_POINTS} points). Remove one to add another.`;
+  if (!points.length) return 'Press “Add points on map”, then click the map for each place, in order. The first pin is your start and the last is your destination.';
+  if (points.length === 1) return 'Add at least one more point to get directions.';
+  return 'Drag a pin to move it, or × to remove it. Your route is saved with your trip.';
+}
+
+function renderRoutePanel() {
+  const points = routePoints();
+  elements.routeList.innerHTML = points.map((point, index) => {
+    const { kind, name } = pointRole(index, points.length);
+    return `<li class="route-row"><span class="route-badge ${kind}" aria-hidden="true">${index + 1}</span>`
+      + `<div class="route-copy"><span class="route-label">${name}</span><span class="route-value" title="${coordLabel(point)}">${escapeHtml(pointLabel(point))}</span></div>`
+      + `<button class="pack-remove" type="button" data-route-remove="${index}" aria-label="Remove ${name} (${escapeHtml(pointLabel(point))})" title="Remove">×</button></li>`;
+  }).join('');
+  const full = points.length >= MAX_ROUTE_POINTS;
+  elements.routeToggle.textContent = placingPins ? 'Done' : '＋ Add points on map';
+  elements.routeToggle.setAttribute('aria-pressed', String(placingPins));
+  elements.routeToggle.disabled = full && !placingPins;
+  elements.routeClearAll.hidden = !points.length;
+  const url = directionsUrl(points);
+  const link = elements.routeDirections;
+  if (url) link.href = url;
+  else link.removeAttribute('href');
+  link.setAttribute('aria-disabled', String(!url));
+  elements.routeHint.textContent = routeHint(points);
+  elements.mapElement.classList.toggle('placing-pin', placingPins);
+}
+
+function renderPlanRoute() {
+  const points = routePoints();
+  elements.planRoute.hidden = !points.length;
+  if (!points.length) return (elements.planRoute.innerHTML = '');
+  const url = directionsUrl(points);
+  elements.planRoute.innerHTML = `<span class="field-label">ROUTE</span><span>${points.map((point, index) => `${index + 1} · ${escapeHtml(pointLabel(point))}`).join(' → ')}</span>`
+    + (url ? `<a href="${url}" target="_blank" rel="noopener">Directions ↗</a>` : '');
+}
+
+map.on('click', event => addRoutePoint(event.latlng));
+
+elements.routePanel.addEventListener('click', event => {
+  if (event.target.closest('#route-toggle')) {
+    setPlacingPins(!placingPins);
+    if (placingPins && window.innerWidth <= 800) document.querySelector('.map-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  const removeButton = event.target.closest('[data-route-remove]');
+  if (removeButton) return removeRoutePoint(Number(removeButton.dataset.routeRemove));
+  if (event.target.closest('#route-clear-all') && plan) {
+    placingPins = false;
+    plan.route = cleanRoute(null);
+    persistPlan();
+  }
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && placingPins) setPlacingPins(false);
+});
+
 function savePlanToLog() {
-  if (!plan.days.some(day => day.destination || day.trails.length)) return notify('Add a destination or trail before saving.');
+  if (!plan.days.some(day => day.destination || day.trails.length) && !hasRoute()) return notify('Add a destination, trail or map pin before saving.');
   if (!plan.name.trim()) plan.name = defaultPlanName(plan);
   const trips = readStorage(STORAGE_KEYS.trips);
   const existing = trips.findIndex(trip => trip.id === plan.id);
@@ -1899,7 +2224,7 @@ elements.planAddDay.addEventListener('click', () => {
   elements.planDays.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 });
 elements.planNew.addEventListener('click', () => {
-  const hasContent = plan.days.some(day => day.destination || day.trails.length) || tripPacking().items.length > 0;
+  const hasContent = plan.days.some(day => day.destination || day.trails.length) || tripPacking().items.length > 0 || hasRoute();
   if (hasContent && !confirm('Clear this plan and start a new one? Trips already saved to your log are kept.')) return;
   setPlan(newPlan());
   notify('Started a new plan.');

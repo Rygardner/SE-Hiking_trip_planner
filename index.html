@@ -64,6 +64,15 @@
           <span class="weather-temp" id="weather-temp">--°</span>
         </section>
 
+        <section class="hourly-panel" id="hourly-panel" aria-labelledby="hourly-heading">
+          <div class="section-heading"><span class="field-label" id="hourly-heading">HOUR BY HOUR</span><span class="tiny-mark" id="hourly-where"></span></div>
+          <p class="hourly-note" id="hourly-note" aria-live="polite">Search a place to see the hourly forecast for your hike.</p>
+          <table class="hourly-table" id="hourly-table" hidden>
+            <thead><tr><th scope="col">Time</th><th scope="col">Conditions</th><th scope="col">Temp</th><th scope="col">Rain</th><th scope="col">Wind</th></tr></thead>
+            <tbody id="hourly-rows"></tbody>
+          </table>
+        </section>
+
         <section class="gear-panel" id="gear-panel" data-pack-host="sidebar">
           <div class="section-heading"><span class="field-label">PACK FOR THE DAY</span><span class="tiny-mark" id="pack-progress" data-pack="progress" aria-live="polite">0/0 PACKED</span></div>
           <p class="pack-trip" id="pack-trip" data-pack="trip"></p>
@@ -89,6 +98,17 @@
             </form>
           </div>
           <button class="text-button" id="pack-reset" data-pack="reset" type="button">Uncheck everything</button>
+        </section>
+
+        <section class="route-panel" id="route-panel" aria-labelledby="route-heading">
+          <div class="section-heading"><span class="field-label" id="route-heading">ROUTE PINS</span><span class="tiny-mark">SAVED WITH YOUR TRIP</span></div>
+          <ol class="route-list" id="route-list" aria-label="Route points in order"></ol>
+          <p class="route-hint" id="route-hint" aria-live="polite">Press “Add points on map”, then click the map for each place, in order. The first pin is your start and the last is your destination.</p>
+          <div class="route-actions">
+            <button class="ghost-button route-set" type="button" id="route-toggle" aria-pressed="false">＋ Add points on map</button>
+            <button class="text-button" type="button" id="route-clear-all" hidden>Clear all</button>
+          </div>
+          <a class="primary-button route-directions" id="route-directions" target="_blank" rel="noopener" aria-disabled="true">Directions in Google Maps ↗</a>
         </section>
 
         <section class="cost-panel">
@@ -167,6 +187,7 @@
         <label class="field-group"><span class="field-label">START DATE</span><input id="plan-start" class="input-field" type="date" /></label>
       </div>
       <div class="planner-summary" id="plan-summary"></div>
+      <p class="plan-route" id="plan-route" hidden></p>
       <details class="plan-packing" id="plan-packing" data-pack-host="planner">
         <summary><span class="field-label">PACKING CHECKLIST</span><span class="tiny-mark" data-pack="progress">0/0 PACKED</span></summary>
         <div class="plan-packing-body">
